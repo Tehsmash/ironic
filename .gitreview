@@ -1,5 +1,5 @@
 [gerrit]
-host=review.openstack.org
+host=review.gerrithub.io
 port=29418
-project=openstack/ironic.git
-defaultbranch=stable/juno
+project=cisco-openstack/ironic.git
+defaultbranch=stable/junoplus
