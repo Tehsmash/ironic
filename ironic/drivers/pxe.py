@@ -29,6 +29,7 @@ from ironic.drivers.modules import ipminative
 from ironic.drivers.modules import ipmitool
 from ironic.drivers.modules import pxe
 from ironic.drivers.modules import seamicro
+from ironic.drivers.modules import cisco
 from ironic.drivers.modules import snmp
 from ironic.drivers.modules import ssh
 from ironic.drivers import utils
@@ -118,6 +119,36 @@ class PXEAndSeaMicroDriver(base.BaseDriver):
                         'attach_volume': self.seamicro_vendor,
                         'set_node_vlan_id': self.seamicro_vendor}
         self.vendor = utils.MixinVendorInterface(self.mapping)
+
+class PXEAndCiscoUCSMDriver(base.BaseDriver):
+    """PXE + Cisco UCSM driver.
+
+    This driver implements the `core` functionality, combining
+    :class:ironic.drivers.modules.cisco.Power for power
+    on/off and reboot with
+    :class:ironic.driver.modules.pxe.PXE for image deployment.
+    Implementations are in those respective classes;
+    this class is merely the glue between them.
+    """
+
+    def __init__(self):
+        if not importutils.try_import('UcsSdk'):
+            raise exception.DriverNotFound('PXEAndCiscoUCSMDriver')
+        self.power = cisco.Power()
+        self.deploy = pxe.PXEDeploy()
+        self.ucsm_vendor = cisco.VendorPassthru()
+        self.pxe_vendor = pxe.VendorPassthru()
+        self.mapping = {'pass_deploy_info': self.pxe_vendor,
+                        'launch_kvm': self.ucsm_vendor,
+                        'get_location': self.ucsm_vendor,
+                        'get_inventory': self.ucsm_vendor,
+                        'get_faults': self.ucsm_vendor,
+                        'get_temperature_stats': self.ucsm_vendor,
+                        'get_power_stats': self.ucsm_vendor,
+                        'get_firmware_version': self.ucsm_vendor}
+        self.driver_vendor_mapping = {
+                        'enroll_nodes': self.ucsm_vendor}
+        self.vendor = utils.MixinVendorInterface(self.mapping, self.driver_vendor_mapping)
 
 
 class PXEAndIBootDriver(base.BaseDriver):

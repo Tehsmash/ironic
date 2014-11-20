@@ -142,6 +142,15 @@ def get_test_snmp_info(**kw):
     return result
 
 
+def get_test_cisco_info():
+    return {
+        "username":"admin",
+        "password":"Nbv12345",
+        "service_profile": "org-root/ls-devstack",
+        "hostname": "ucs-b"
+    }
+
+
 def get_test_node(**kw):
     properties = {
         "cpu_arch": "x86_64",
