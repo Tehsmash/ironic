@@ -895,25 +895,18 @@ class VendorPassthru(base.VendorInterface):
 
         :param task: a task from TaskManager.
         :param kwargs: info for action.
-        :raises: InvalidParameterValue if kwargs does not contain 'method',
-                 'method' is not supported or a byte string is not given for
-                 'raw_bytes'.
+        :raises: InvalidParameterValue when an invalid parameter value is
+                 specified.
         :raises: MissingParameterValue if a required parameter is missing.
 
         """
         method = kwargs['method']
         if method == 'send_raw':
             if not kwargs.get('raw_bytes'):
-                raise exception.InvalidParameterValue(_(
+                raise exception.MissingParameterValue(_(
                     'Parameter raw_bytes (string of bytes) was not '
                     'specified.'))
-        elif method == 'bmc_reset':
-            # no additional parameters needed
-            pass
-        else:
-            raise exception.InvalidParameterValue(_(
-                "Unsupported method (%s) passed to IPMItool driver.")
-                % method)
+
         _parse_driver_info(task.node)
 
 

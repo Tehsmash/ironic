@@ -24,6 +24,7 @@ from ironic.common.i18n import _
 from ironic.drivers import base
 from ironic.drivers.modules import iboot
 from ironic.drivers.modules.ilo import deploy as ilo_deploy
+from ironic.drivers.modules.ilo import management as ilo_management
 from ironic.drivers.modules.ilo import power as ilo_power
 from ironic.drivers.modules import ipminative
 from ironic.drivers.modules import ipmitool
@@ -118,6 +119,7 @@ class PXEAndSeaMicroDriver(base.BaseDriver):
                         'attach_volume': self.seamicro_vendor,
                         'set_node_vlan_id': self.seamicro_vendor}
         self.vendor = utils.MixinVendorInterface(self.mapping)
+        self.console = seamicro.ShellinaboxConsole()
 
 
 class PXEAndIBootDriver(base.BaseDriver):
@@ -146,8 +148,7 @@ class PXEAndIloDriver(base.BaseDriver):
 
     This driver implements the `core` functionality using
     :class:`ironic.drivers.modules.ilo.power.IloPower` for power management
-    :class:`ironic.drivers.modules.ilo.deploy.IloPXEDeploy`
-    :class:`ironic.drivers.modules.ilo.deploy.IloManagement` for image
+    :class:`ironic.drivers.modules.ilo.deploy.IloPXEDeploy` for image
     deployment.
 
     """
@@ -161,7 +162,7 @@ class PXEAndIloDriver(base.BaseDriver):
         self.deploy = ilo_deploy.IloPXEDeploy()
         self.vendor = ilo_deploy.IloPXEVendorPassthru()
         self.console = ilo_deploy.IloConsoleInterface()
-        self.management = ilo_deploy.IloManagement()
+        self.management = ilo_management.IloManagement()
 
 
 class PXEAndSNMPDriver(base.BaseDriver):

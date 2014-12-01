@@ -162,7 +162,7 @@ class ConductorManager(periodic_task.PeriodicTasks):
     """Ironic Conductor manager main class."""
 
     # NOTE(rloo): This must be in sync with rpcapi.ConductorAPI's.
-    RPC_API_VERSION = '1.20'
+    RPC_API_VERSION = '1.21'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -398,7 +398,7 @@ class ConductorManager(periodic_task.PeriodicTasks):
             if not getattr(task.driver, 'vendor', None):
                 raise exception.UnsupportedDriverExtension(
                     driver=task.node.driver,
-                    extension='vendor passthru')
+                    extension='vendor interface')
 
             vendor_iface = task.driver.vendor
 
@@ -506,6 +506,8 @@ class ConductorManager(periodic_task.PeriodicTasks):
                             "of driver_vendor_passthru() has been "
                             "deprecated. Please update the code to use "
                             "the @driver_passthru decorator."))
+
+            driver.vendor.driver_validate(method=driver_method, **info)
             ret = driver.vendor.driver_vendor_passthru(
                             context, method=driver_method, **info)
             # DriverVendorPassthru was always sync
@@ -527,22 +529,66 @@ class ConductorManager(periodic_task.PeriodicTasks):
         # Inform the vendor method which HTTP method it was invoked with
         info['http_method'] = http_method
 
-        # FIXME(lucasagomes): This code should be able to call
-        # validate(). The problem is that at the moment the validate()
-        # expects a task object as the first parameter and in this
-        # method we don't have it because we don't have a Node to
-        # acquire.
-        # See: https://bugs.launchpad.net/ironic/+bug/1391580
-
         # Invoke the vendor method accordingly with the mode
         is_async = vendor_opts['async']
         ret = None
+        driver.vendor.driver_validate(method=driver_method, **info)
+
         if is_async:
             self._spawn_worker(vendor_func, context, **info)
         else:
             ret = vendor_func(context, **info)
 
         return (ret, is_async)
+
+    def _get_vendor_passthru_metadata(self, route_dict):
+        d = {}
+        for method, metadata in route_dict.iteritems():
+            # 'func' is the vendor method reference, ignore it
+            d[method] = {k: metadata[k] for k in metadata if k != 'func'}
+        return d
+
+    @messaging.expected_exceptions(exception.UnsupportedDriverExtension)
+    def get_node_vendor_passthru_methods(self, context, node_id):
+        """Retrieve information about vendor methods of the given node.
+
+        :param context: an admin context.
+        :param node_id: the id or uuid of a node.
+        :returns: dictionary of <method name>:<method metadata> entries.
+
+        """
+        LOG.debug("RPC get_node_vendor_passthru_methods called for node %s"
+                  % node_id)
+        with task_manager.acquire(context, node_id, shared=True) as task:
+            if not getattr(task.driver, 'vendor', None):
+                raise exception.UnsupportedDriverExtension(
+                    driver=task.node.driver,
+                    extension='vendor interface')
+
+            return self._get_vendor_passthru_metadata(
+                       task.driver.vendor.vendor_routes)
+
+    @messaging.expected_exceptions(exception.UnsupportedDriverExtension,
+                                   exception.DriverNotFound)
+    def get_driver_vendor_passthru_methods(self, context, driver_name):
+        """Retrieve information about vendor methods of the given driver.
+
+        :param context: an admin context.
+        :param driver_name: name of the driver.
+        :returns: dictionary of <method name>:<method metadata> entries.
+
+        """
+        # Any locking in a top-level vendor action will need to be done by the
+        # implementation, as there is little we could reasonably lock on here.
+        LOG.debug("RPC get_driver_vendor_passthru_methods for driver %s"
+                  % driver_name)
+        driver = self._get_driver(driver_name)
+        if not getattr(driver, 'vendor', None):
+            raise exception.UnsupportedDriverExtension(
+                driver=driver_name,
+                extension='vendor interface')
+
+        return self._get_vendor_passthru_metadata(driver.vendor.driver_routes)
 
     def _provisioning_error_handler(self, e, node, provision_state,
                                     target_provision_state):

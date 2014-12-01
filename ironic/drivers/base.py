@@ -361,7 +361,8 @@ VendorMetadata = collections.namedtuple('VendorMetadata', ['method',
                                                            'metadata'])
 
 
-def _passthru(http_methods, method=None, async=True, driver_passthru=False):
+def _passthru(http_methods, method=None, async=True, driver_passthru=False,
+              description=None):
     """A decorator for registering a function as a passthru function.
 
     Decorator ensures function is ready to catch any ironic exceptions
@@ -382,6 +383,7 @@ def _passthru(http_methods, method=None, async=True, driver_passthru=False):
     :param driver_passthru: Boolean value. True if this is a driver vendor
                             passthru method, and False if it is a node
                             vendor passthru method.
+    :param description: a string shortly describing what the method does.
 
     """
     def handle_passthru(func):
@@ -390,8 +392,10 @@ def _passthru(http_methods, method=None, async=True, driver_passthru=False):
             api_method = func.__name__
 
         supported_ = [i.upper() for i in http_methods]
+        description_ = description or ''
         metadata = VendorMetadata(api_method, {'http_methods': supported_,
-                                               'async': async})
+                                               'async': async,
+                                               'description': description_})
         if driver_passthru:
             func._driver_metadata = metadata
         else:
@@ -414,12 +418,14 @@ def _passthru(http_methods, method=None, async=True, driver_passthru=False):
     return handle_passthru
 
 
-def passthru(http_methods, method=None, async=True):
-    return _passthru(http_methods, method, async, driver_passthru=False)
+def passthru(http_methods, method=None, async=True, description=None):
+    return _passthru(http_methods, method, async, driver_passthru=False,
+                     description=description)
 
 
-def driver_passthru(http_methods, method=None, async=True):
-    return _passthru(http_methods, method, async, driver_passthru=True)
+def driver_passthru(http_methods, method=None, async=True, description=None):
+    return _passthru(http_methods, method, async, driver_passthru=True,
+                     description=description)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -474,6 +480,19 @@ class VendorInterface(object):
         :raises: InvalidParameterValue if kwargs does not contain 'method'.
         :raises: MissingParameterValue
         """
+
+    def driver_validate(self, method, **kwargs):
+        """Validate driver-vendor-passthru actions.
+
+        If invalid, raises an exception; otherwise returns None.
+
+        :param method: method to be validated
+        :param kwargs: info for action.
+        :raises: MissingParameterValue if kwargs does not contain
+                 certain parameter.
+        :raises: InvalidParameterValue if parameter does not match.
+        """
+        pass
 
 
 @six.add_metaclass(abc.ABCMeta)

@@ -31,7 +31,6 @@ from ironic.api.controllers.v1 import types
 from ironic.api.controllers.v1 import utils as api_utils
 from ironic.common import exception
 from ironic.common.i18n import _
-from ironic.common.i18n import _LW
 from ironic.common import states as ir_states
 from ironic.common import utils
 from ironic import objects
@@ -43,6 +42,16 @@ CONF.import_opt('heartbeat_timeout', 'ironic.conductor.manager',
                 group='conductor')
 
 LOG = log.getLogger(__name__)
+
+# Vendor information for node's driver:
+#   key = driver name;
+#   value = dictionary of node vendor methods of that driver:
+#             key = method name.
+#             value = dictionary with the metadata of that method.
+# NOTE(lucasagomes). This is cached for the lifetime of the API
+# service. If one or more conductor services are restarted with new driver
+# versions, the API service should be restarted.
+_VENDOR_METHODS = {}
 
 
 class NodePatchType(types.JsonPatchType):
@@ -216,8 +225,8 @@ class NodeStates(base.APIBase):
 
     last_error = wtypes.text
 
-    @classmethod
-    def convert(cls, rpc_node):
+    @staticmethod
+    def convert(rpc_node):
         attr_list = ['console_enabled', 'last_error', 'power_state',
                      'provision_state', 'target_power_state',
                      'target_provision_state', 'provision_updated_at']
@@ -466,8 +475,8 @@ class Node(base.APIBase):
         self.fields.append('chassis_id')
         setattr(self, 'chassis_uuid', kwargs.get('chassis_id', wtypes.Unset))
 
-    @classmethod
-    def _convert_with_links(cls, node, url, expand=True):
+    @staticmethod
+    def _convert_with_links(node, url, expand=True):
         if not expand:
             except_list = ['instance_uuid', 'maintenance', 'power_state',
                            'provision_state', 'uuid']
@@ -528,9 +537,8 @@ class NodeCollection(collection.Collection):
     def __init__(self, **kwargs):
         self._type = 'nodes'
 
-    @classmethod
-    def convert_with_links(cls, nodes, limit, url=None,
-                           expand=False, **kwargs):
+    @staticmethod
+    def convert_with_links(nodes, limit, url=None, expand=False, **kwargs):
         collection = NodeCollection()
         collection.nodes = [Node.convert_with_links(n, expand) for n in nodes]
         collection.next = collection.get_next(limit, url=url, **kwargs)
@@ -551,6 +559,31 @@ class NodeVendorPassthruController(rest.RestController):
     the Ironic API. Ironic will merely relay the message from here to the
     appropriate driver, no introspection will be made in the message body.
     """
+
+    _custom_actions = {
+        'methods': ['GET']
+    }
+
+    @wsme_pecan.wsexpose(wtypes.text, types.uuid)
+    def methods(self, node_uuid):
+        """Retrieve information about vendor methods of the given node.
+
+        :param node_uuid: UUID of a node.
+        :returns: dictionary with <vendor method name>:<method metadata>
+                  entries.
+        :raises: NodeNotFound if the node is not found.
+        """
+        # Raise an exception if node is not found
+        rpc_node = objects.Node.get_by_uuid(pecan.request.context,
+                                            node_uuid)
+
+        if rpc_node.driver not in _VENDOR_METHODS:
+            topic = pecan.request.rpcapi.get_topic_for(rpc_node)
+            ret = pecan.request.rpcapi.get_node_vendor_passthru_methods(
+                        pecan.request.context, node_uuid, topic=topic)
+            _VENDOR_METHODS[rpc_node.driver] = ret
+
+        return _VENDOR_METHODS[rpc_node.driver]
 
     @wsme_pecan.wsexpose(wtypes.text, types.uuid, wtypes.text,
                          body=wtypes.text)
@@ -858,11 +891,6 @@ class NodesController(rest.RestController):
                 patch_val = None
             if rpc_node[field] != patch_val:
                 rpc_node[field] = patch_val
-
-                if field == 'maintenance':
-                    LOG.warning(_LW('Setting maintenance via node update is '
-                            'deprecated. The /v1/nodes/<uuid>/maintenance '
-                            'endpoint should be used instead.'))
 
         # NOTE(deva): we calculate the rpc topic here in case node.driver
         #             has changed, so that update is sent to the

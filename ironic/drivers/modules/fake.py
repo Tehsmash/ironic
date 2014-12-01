@@ -31,15 +31,6 @@ from ironic.common import states
 from ironic.drivers import base
 
 
-def _raise_unsupported_error(method=None):
-    if method:
-        raise exception.InvalidParameterValue(_(
-            "Unsupported method (%s) passed through to vendor extension.")
-            % method)
-    raise exception.MissingParameterValue(_(
-        "Method not specified when calling vendor extension."))
-
-
 class FakePower(base.PowerInterface):
     """Example implementation of a simple power interface."""
 
@@ -105,10 +96,9 @@ class FakeVendorA(base.VendorInterface):
             if not bar:
                 raise exception.MissingParameterValue(_(
                     "Parameter 'bar' not passed to method 'first_method'."))
-            return
-        _raise_unsupported_error(method)
 
-    @base.passthru(['POST'])
+    @base.passthru(['POST'],
+                   description=_("Test if the value of bar is baz"))
     def first_method(self, task, http_method, bar):
         return True if bar == 'baz' else False
 
@@ -127,14 +117,14 @@ class FakeVendorB(base.VendorInterface):
             if not bar:
                 raise exception.MissingParameterValue(_(
                     "Parameter 'bar' not passed to method '%s'.") % method)
-            return
-        _raise_unsupported_error(method)
 
-    @base.passthru(['POST'])
+    @base.passthru(['POST'],
+                   description=_("Test if the value of bar is kazoo"))
     def second_method(self, task, http_method, bar):
         return True if bar == 'kazoo' else False
 
-    @base.passthru(['POST'], async=False)
+    @base.passthru(['POST'], async=False,
+                   description=_("Test if the value of bar is meow"))
     def third_method_sync(self, task, http_method, bar):
         return True if bar == 'meow' else False
 

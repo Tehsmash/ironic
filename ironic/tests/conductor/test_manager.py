@@ -676,6 +676,31 @@ class VendorPassthruTestCase(_ServiceSetUpMixin, tests_db_base.DbTestCase):
         task.spawn_after.assert_called_once_with(mock.ANY, vendor_passthru_ref,
             task, bar='baz', method='test_method')
 
+    def test_get_node_vendor_passthru_methods(self):
+        node = obj_utils.create_test_node(self.context, driver='fake')
+        fake_routes = {'test_method': {'async': True,
+                                       'description': 'foo',
+                                       'http_methods': ['POST'],
+                                       'func': None}}
+        self.driver.vendor.vendor_routes = fake_routes
+        self._start_service()
+
+        data = self.service.get_node_vendor_passthru_methods(self.context,
+                                                         node.uuid)
+        # The function reference should not be returned
+        del fake_routes['test_method']['func']
+        self.assertEqual(fake_routes, data)
+
+    def test_get_node_vendor_passthru_methods_not_supported(self):
+        node = obj_utils.create_test_node(self.context, driver='fake')
+        self.driver.vendor = None
+        exc = self.assertRaises(messaging.rpc.ExpectedException,
+                                self.service.get_node_vendor_passthru_methods,
+                                self.context, node.uuid)
+        # Compare true exception hidden by @messaging.expected_exceptions
+        self.assertEqual(exception.UnsupportedDriverExtension,
+                         exc.exc_info[0])
+
     @mock.patch.object(manager.ConductorManager, '_spawn_worker')
     def test_driver_vendor_passthru_sync(self, mock_spawn):
         expected = {'foo': 'bar'}
@@ -790,6 +815,48 @@ class VendorPassthruTestCase(_ServiceSetUpMixin, tests_db_base.DbTestCase):
         self.assertEqual((expected, False), response)
         driver_vendor_passthru_ref.assert_called_once_with(
                 self.context, test='arg', method='test_method')
+
+    def test_get_driver_vendor_passthru_methods(self):
+        self.driver.vendor = mock.Mock(spec=drivers_base.VendorInterface)
+        fake_routes = {'test_method': {'async': True,
+                                       'description': 'foo',
+                                       'http_methods': ['POST'],
+                                       'func': None}}
+        self.driver.vendor.driver_routes = fake_routes
+        self.service.init_host()
+
+        data = self.service.get_driver_vendor_passthru_methods(self.context,
+                                                               'fake')
+        # The function reference should not be returned
+        del fake_routes['test_method']['func']
+        self.assertEqual(fake_routes, data)
+
+    def test_get_driver_vendor_passthru_methods_not_supported(self):
+        self.service.init_host()
+        self.driver.vendor = None
+        exc = self.assertRaises(messaging.rpc.ExpectedException,
+                              self.service.get_driver_vendor_passthru_methods,
+                              self.context, 'fake')
+        # Compare true exception hidden by @messaging.expected_exceptions
+        self.assertEqual(exception.UnsupportedDriverExtension,
+                         exc.exc_info[0])
+
+    @mock.patch.object(drivers_base.VendorInterface, 'driver_validate')
+    def test_driver_vendor_passthru_validation_failed(self, validate_mock):
+        validate_mock.side_effect = exception.MissingParameterValue('error')
+        test_method = mock.Mock()
+        self.driver.vendor.driver_routes = {'test_method':
+                                           {'func': test_method,
+                                            'async': False,
+                                            'http_methods': ['POST']}}
+        self.service.init_host()
+        exc = self.assertRaises(messaging.ExpectedException,
+                                self.service.driver_vendor_passthru,
+                                self.context, 'fake', 'test_method',
+                                'POST', {})
+        self.assertEqual(exception.MissingParameterValue,
+                         exc.exc_info[0])
+        self.assertFalse(test_method.called)
 
 
 @_mock_record_keepalive
@@ -2349,7 +2416,7 @@ class ManagerTestProperties(tests_db_base.DbTestCase):
     def test_driver_properties_fake_seamicro(self):
         expected = ['seamicro_api_endpoint', 'seamicro_password',
                     'seamicro_server_id', 'seamicro_username',
-                    'seamicro_api_version']
+                    'seamicro_api_version', 'seamicro_terminal_port']
         self._check_driver_properties("fake_seamicro", expected)
 
     def test_driver_properties_fake_snmp(self):
@@ -2384,7 +2451,7 @@ class ManagerTestProperties(tests_db_base.DbTestCase):
         expected = ['pxe_deploy_kernel', 'pxe_deploy_ramdisk',
                    'seamicro_api_endpoint', 'seamicro_password',
                    'seamicro_server_id', 'seamicro_username',
-                   'seamicro_api_version']
+                   'seamicro_api_version', 'seamicro_terminal_port']
         self._check_driver_properties("pxe_seamicro", expected)
 
     def test_driver_properties_pxe_snmp(self):

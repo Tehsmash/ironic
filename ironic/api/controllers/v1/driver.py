@@ -35,6 +35,16 @@ from ironic.common.i18n import _
 # service should be restarted.
 _DRIVER_PROPERTIES = {}
 
+# Vendor information for drivers:
+#   key = driver name;
+#   value = dictionary of vendor methods of that driver:
+#             key = method name.
+#             value = dictionary with the metadata of that method.
+# NOTE(lucasagomes). This is cached for the lifetime of the API
+# service. If one or more conductor services are restarted with new driver
+# versions, the API service should be restarted.
+_VENDOR_METHODS = {}
+
 
 class Driver(base.APIBase):
     """API representation of a driver."""
@@ -48,8 +58,8 @@ class Driver(base.APIBase):
     links = wsme.wsattr([link.Link], readonly=True)
     """A list containing self and bookmark links"""
 
-    @classmethod
-    def convert_with_links(cls, name, hosts):
+    @staticmethod
+    def convert_with_links(name, hosts):
         driver = Driver()
         driver.name = name
         driver.hosts = hosts
@@ -77,8 +87,8 @@ class DriverList(base.APIBase):
     drivers = [Driver]
     """A list containing drivers objects"""
 
-    @classmethod
-    def convert_with_links(cls, drivers):
+    @staticmethod
+    def convert_with_links(drivers):
         collection = DriverList()
         collection.drivers = [
             Driver.convert_with_links(dname, list(drivers[dname]))
@@ -99,6 +109,28 @@ class DriverPassthruController(rest.RestController):
     Ironic API. Ironic will merely relay the message from here to the specified
     driver, no introspection will be made in the message body.
     """
+
+    _custom_actions = {
+        'methods': ['GET']
+    }
+
+    @wsme_pecan.wsexpose(wtypes.text, wtypes.text)
+    def methods(self, driver_name):
+        """Retrieve information about vendor methods of the given driver.
+
+        :param driver_name: name of the driver.
+        :returns: dictionary with <vendor method name>:<method metadata>
+                  entries.
+        :raises: DriverNotFound if the driver name is invalid or the
+                 driver cannot be loaded.
+        """
+        if driver_name not in _VENDOR_METHODS:
+            topic = pecan.request.rpcapi.get_topic_for_driver(driver_name)
+            ret = pecan.request.rpcapi.get_driver_vendor_passthru_methods(
+                        pecan.request.context, driver_name, topic=topic)
+            _VENDOR_METHODS[driver_name] = ret
+
+        return _VENDOR_METHODS[driver_name]
 
     @wsme_pecan.wsexpose(wtypes.text, wtypes.text, wtypes.text,
                          body=wtypes.text)
