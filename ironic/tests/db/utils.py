@@ -144,8 +144,8 @@ def get_test_snmp_info(**kw):
 
 def get_test_cisco_info():
     return {
-        "username":"admin",
-        "password":"Nbv12345",
+        "username": "admin",
+        "password": "Nbv12345",
         "service_profile": "org-root/ls-devstack",
         "hostname": "ucs-b"
     }
