@@ -25,8 +25,10 @@ from ironic.drivers import base
 from ironic.drivers.modules import agent
 from ironic.drivers.modules.amt import management as amt_mgmt
 from ironic.drivers.modules.amt import power as amt_power
+from ironic.drivers.modules.cimc import boot as cimc_boot
 from ironic.drivers.modules.cimc import management as cimc_mgmt
 from ironic.drivers.modules.cimc import power as cimc_power
+from ironic.drivers.modules.cimc import vendor as cimc_vendor
 from ironic.drivers.modules.drac import management as drac_mgmt
 from ironic.drivers.modules.drac import power as drac_power
 from ironic.drivers.modules import fake
@@ -280,8 +282,10 @@ class FakeCIMCDriver(base.BaseDriver):
                 driver=self.__class__.__name__,
                 reason=_("Unable to import ImcSdk library"))
         self.power = cimc_power.Power()
+        self.boot = cimc_boot.PXEBoot()
         self.deploy = fake.FakeDeploy()
         self.management = cimc_mgmt.CIMCManagement()
+        self.vendor = cimc_vendor.CIMCPXEVendorPassthru()
 
 
 class FakeWakeOnLanDriver(base.BaseDriver):
