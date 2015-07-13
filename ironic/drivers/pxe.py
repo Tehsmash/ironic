@@ -25,6 +25,10 @@ from ironic.drivers import base
 from ironic.drivers.modules.amt import management as amt_management
 from ironic.drivers.modules.amt import power as amt_power
 from ironic.drivers.modules.amt import vendor as amt_vendor
+from ironic.drivers.modules.cimc import deploy as cimc_deploy
+from ironic.drivers.modules.cimc import management as cimc_mgmt
+from ironic.drivers.modules.cimc import power as cimc_power
+from ironic.drivers.modules.cimc import vendor as cimc_vendor
 from ironic.drivers.modules import iboot
 from ironic.drivers.modules.ilo import deploy as ilo_deploy
 from ironic.drivers.modules.ilo import inspect as ilo_inspect
@@ -317,6 +321,34 @@ class PXEAndUcsDriver(base.BaseDriver):
         self.deploy = iscsi_deploy.ISCSIDeploy()
         self.management = ucs_mgmt.UcsManagement()
         self.vendor = iscsi_deploy.VendorPassthru()
+
+
+class PXEAndCIMCDriver(base.BaseDriver):
+
+    def __init__(self):
+        if not importutils.try_import('ImcSdk'):
+            raise exception.DriverLoadError(
+                driver=self.__class__.__name__,
+                reason=_("Unable to import ImcSdk library"))
+        self.power = cimc_power.Power()
+        self.boot = pxe.PXEBoot()
+        self.deploy = iscsi_deploy.ISCSIDeploy()
+        self.management = cimc_mgmt.UcsManagement()
+        self.vendor = iscsi_deploy.VendorPassthru()
+
+
+class PXEAndCIMCNeutronDriver(base.BaseDriver):
+
+    def __init__(self):
+        if not importutils.try_import('ImcSdk'):
+            raise exception.DriverLoadError(
+                driver=self.__class__.__name__,
+                reason=_("Unable to import ImcSdk library"))
+        self.power = cimc_power.Power()
+        self.boot = cimc_deploy.PXEBoot()
+        self.deploy = iscsi_deploy.ISCSIDeploy()
+        self.management = cimc_mgmt.UcsManagement()
+        self.vendor = cimc_vendor.CIMCPXEVendorPassthru()
 
 
 class PXEAndWakeOnLanDriver(base.BaseDriver):
