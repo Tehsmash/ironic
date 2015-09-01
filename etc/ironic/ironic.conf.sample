@@ -448,6 +448,21 @@
 #max_limit=1000
 
 
+[cimc]
+
+#
+# Options defined in ironic.drivers.modules.cimc.power
+#
+
+# Number of times a power operation needs to be retried
+# (integer value)
+#max_retry=6
+
+# Amount of time in seconds to wait in between power
+# operations (integer value)
+#action_interval=10
+
+
 [cisco_ucs]
 
 #
