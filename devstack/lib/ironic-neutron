@@ -3,8 +3,10 @@
 function ironic_configure_neutron_physical_network {
     if [[ "$Q_AGENT" == "openvswitch" ]]; then
         ironic_configure_neutron_ironic_ovs_bridge
+    elif [[ "$Q_AGENT" == "linuxbridge" ]]; then
+        ironic_configure_neutron_ironic_lb
     else
-        die $LINENO "Unsupported neutron Q_AGENT only openvswitch is supported."
+        die $LINENO "Unsupported neutron Q_AGENT only openvswitch or linuxbridge are supported by the Ironic devstack plugin."
     fi
     if [[ "$IRONIC_PHYSICAL_NETWORK_TYPE" == "flat" ]]; then
         ironic_configure_neutron_flat_network
@@ -13,6 +15,17 @@ function ironic_configure_neutron_physical_network {
     else
         die $LINENO "Unsupported network type provided ${IRONIC_PHYSICAL_NETWORK_TYPE} only vlan and flat are supported."
     fi
+}
+
+function ironic_configure_neutron_ironic_lb {
+    # Append interface mappings here to ensure that we don't affect anything
+    # that the neutron devstack plugin has done.
+    if [[ -z "$LB_INTERFACE_MAPPINGS" ]]; then
+        LB_INTERFACE_MAPPINGS="$IRONIC_PHYSICAL_NETWORK:$IRONIC_PHYSICAL_INTERFACE"
+    else
+        LB_INTERFACE_MAPPINGS+=",$IRONIC_PHYSICAL_NETWORK:$IRONIC_PHYSICAL_INTERFACE"
+    fi
+    iniset /$Q_PLUGIN_CONF_FILE linux_bridge physical_interface_mappings $LB_INTERFACE_MAPPINGS
 }
 
 function ironic_configure_neutron_ironic_ovs_bridge {

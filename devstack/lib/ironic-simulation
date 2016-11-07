@@ -76,16 +76,12 @@ function create_simulated_baremetal_environment {
 
     local tapif
     for vm_name in $(_ironic_bm_vm_names); do
-        tapif=tap-$vm_name
-        sudo ip tuntap add dev $tapif mode tap
-        sudo ip link set $tapif mtu $mtu
-        sudo ip link set $tapif up
-        ironic_add_port_to_virtual_switch $vswitch_name $tapif
+        #ironic_add_port_to_virtual_switch $vswitch_name $tapif
         sudo -E su $STACK_USER -c "$IRONIC_SCRIPTS_DIR/create-node.sh -n $vm_name \
             -c $IRONIC_VM_SPECS_CPU -m $IRONIC_VM_SPECS_RAM -d $IRONIC_VM_SPECS_DISK \
-            -a $IRONIC_VM_SPECS_CPU_ARCH -t $tapif $vm_opts -p $vbmc_port -o $pdu_outlet \
-            -f $IRONIC_VM_SPECS_DISK_FORMAT $log_arg -- ${bridge_mac} \
-            ${vswitch_name}" >> $IRONIC_VM_MACS_CSV_FILE
+            -a $IRONIC_VM_SPECS_CPU_ARCH -b $vswitch_name $vm_opts -p $vbmc_port -o $pdu_outlet \
+            -i $IRONIC_VM_INTERFACE_COUNT -f $IRONIC_VM_SPECS_DISK_FORMAT  -M $PUBLIC_BRIDGE_MTU $log_arg" >> $IRONIC_VM_MACS_CSV_FILE
+        echo " ${bridge_mac} $vswitch_name" >> $IRONIC_VM_MACS_CSV_FILE
         vbmc_port=$((vbmc_port+1))
         pdu_outlet=$((pdu_outlet+1))
     done
