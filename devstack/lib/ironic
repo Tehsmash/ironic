@@ -104,6 +104,40 @@ IRONIC_HW_ARCH=${IRONIC_HW_ARCH:-x86_64}
 #
 IRONIC_HWINFO_FILE=${IRONIC_HWINFO_FILE:-$IRONIC_DATA_DIR/hardware_info}
 
+# Config options for setting up the networks required for Ironic provisioning
+# Physical network and simulation options:
+IRONIC_PHYSICAL_INTERFACE=${IRONIC_PHYSICAL_INTERFACE:-}
+IRONIC_PHYSICAL_CONDUCTOR_INTERFACE=${IRONIC_PHYSICAL_CONDUCTOR_INTERFACE:-}
+IRONIC_PHYSICAL_NETWORK=${IRONIC_PHYSICAL_NETWORK:-ironphys}
+IRONIC_PHYSICAL_NETWORK_TYPE=${IRONIC_PHYSICAL_NETWORK_TYPE:-'flat'}
+IRONIC_PHYSICAL_NETWORK_SEG_MIN=${IRONIC_PHYSICAL_NETWORK_SEG_MIN:-100}
+IRONIC_PHYSICAL_NETWORK_SEG_MAX=${IRONIC_PHYSICAL_NETWORK_SEG_MAX:-110}
+# Neutron network options:
+IRONIC_PROVISION_NETWORK_NAME=${IRONIC_PROVISION_NETWORK_NAME:-ironic-service}
+IRONIC_PROVISION_NETWORK_SUBNET_NAME=${IRONIC_PROVISION_NETWORK_SUBNET_NAME:-${IRONIC_PROVISION_NETWORK_NAME}-subnet}
+IRONIC_PROVISION_NETWORK_SEG=${IRONIC_PROVISION_NETWORK_SEG:-$IRONIC_PHYSICAL_NETWORK_SEG_MIN}
+IRONIC_PROVISION_NETWORK_SUBNET_CIDR=${IRONIC_PROVISION_NETWORK_SUBNET_CIDR:-10.20.30.0/24}
+IRONIC_CLEAN_NETWORK_NAME=${IRONIC_CLEAN_NETWORK_NAME:-${IRONIC_PROVISION_NETWORK_NAME}}
+
+if [[ "$HOST_TOPOLOGY_ROLE" == "subnode" ]]; then
+    IRONIC_NETWORK_CONDUCTOR_IP=${IRONIC_NETWORK_CONDUCTOR_IP:-10.20.30.3/24}
+else
+    IRONIC_NETWORK_CONDUCTOR_IP=${IRONIC_NETWORK_CONDUCTOR_IP:-10.20.30.2/24}
+fi
+
+IRONIC_NETWORK_ALLOCATION_MIN=${IRONIC_NETWORK_ALLOCATION_MIN:-10.20.30.4}
+IRONIC_NETWORK_ALLOCATION_MAX=${IRONIC_NETWORK_ALLOCATION_MAX:-10.20.30.254}
+
+# Default ironic network interface to use for enrolled nodes:
+IRONIC_NODE_NETWORK_INTERFACE=${IRONIC_NODE_NETWORK_INTERFACE:-$IRONIC_NETWORK_INTERFACE}
+IRONIC_NODE_NETWORK_INTERFACE=${IRONIC_NODE_NETWORK_INTERFACE:-'flat'}
+
+if [[ "$IRONIC_NODE_NETWORK_INTERFACE" == "neutron" && "$IRONIC_PHYSICAL_NETWORK_TYPE" == "flat" ]]; then
+    # TODO(sambetts) Uncomment this once we have fixed project-config to set IRONIC_PHYSICAL_NETWORK_TYPE= correctly
+    #die $LINENO "Please ensure that IRONIC_PHYSICAL_NETWORK_TYPE is vlan when IRONIC_NODE_NETWORK_INTERFACE is neutron"
+    IRONIC_PHYSICAL_NETWORK_TYPE=vlan
+fi
+
 # Set up defaults for functional / integration testing
 IRONIC_NODE_UUID=${IRONIC_NODE_UUID:-`uuidgen`}
 IRONIC_SCRIPTS_DIR=${IRONIC_SCRIPTS_DIR:-$IRONIC_DEVSTACK_DIR/tools/ironic/scripts}
@@ -117,7 +151,7 @@ IRONIC_SSH_KEY_FILENAME=${IRONIC_SSH_KEY_FILENAME:-ironic_key}
 IRONIC_KEY_FILE=${IRONIC_KEY_FILE:-$IRONIC_SSH_KEY_DIR/$IRONIC_SSH_KEY_FILENAME}
 IRONIC_SSH_VIRT_TYPE=${IRONIC_SSH_VIRT_TYPE:-virsh}
 IRONIC_TFTPBOOT_DIR=${IRONIC_TFTPBOOT_DIR:-$IRONIC_DATA_DIR/tftpboot}
-IRONIC_TFTPSERVER_IP=${IRONIC_TFTPSERVER_IP:-$HOST_IP}
+IRONIC_TFTPSERVER_IP=${IRONIC_TFTPSERVER_IP:-$(echo "$IRONIC_NETWORK_CONDUCTOR_IP" | cut -d '/' -f 1)}
 IRONIC_VM_SSH_PORT=${IRONIC_VM_SSH_PORT:-22}
 IRONIC_VM_SSH_ADDRESS=${IRONIC_VM_SSH_ADDRESS:-$HOST_IP}
 IRONIC_VM_COUNT=${IRONIC_VM_COUNT:-1}
@@ -129,13 +163,10 @@ IRONIC_VM_SPECS_DISK_FORMAT=${IRONIC_VM_SPECS_DISK_FORMAT:-qcow2}
 IRONIC_VM_EPHEMERAL_DISK=${IRONIC_VM_EPHEMERAL_DISK:-0}
 IRONIC_VM_EMULATOR=${IRONIC_VM_EMULATOR:-'/usr/bin/qemu-system-x86_64'}
 IRONIC_VM_ENGINE=${IRONIC_VM_ENGINE:-qemu}
-IRONIC_VM_NETWORK_BRIDGE=${IRONIC_VM_NETWORK_BRIDGE:-brbm}
-IRONIC_VM_NETWORK_RANGE=${IRONIC_VM_NETWORK_RANGE:-192.0.2.0/24}
 # Number of NICs to create Ironic node with. Take affect only for neutron network interface.
 IRONIC_VM_INTERFACE_COUNT=${IRONIC_VM_INTERFACE_COUNT:-1}
 IRONIC_VM_MACS_CSV_FILE=${IRONIC_VM_MACS_CSV_FILE:-$IRONIC_DATA_DIR/ironic_macs.csv}
 IRONIC_AUTHORIZED_KEYS_FILE=${IRONIC_AUTHORIZED_KEYS_FILE:-$HOME/.ssh/authorized_keys}
-IRONIC_CLEAN_NET_NAME=${IRONIC_CLEAN_NET_NAME:-${IRONIC_PROVISION_NETWORK_NAME:-${PRIVATE_NETWORK_NAME}}}
 IRONIC_EXTRA_PXE_PARAMS=${IRONIC_EXTRA_PXE_PARAMS:-}
 IRONIC_TTY_DEV=${IRONIC_TTY_DEV:-ttyS0}
 
@@ -279,10 +310,18 @@ IRONIC_IPXE_ENABLED=$(trueorfalse True IRONIC_IPXE_ENABLED)
 # Options below are only applied when IRONIC_IPXE_ENABLED is True
 IRONIC_IPXE_USE_SWIFT=$(trueorfalse False IRONIC_IPXE_USE_SWIFT)
 IRONIC_HTTP_DIR=${IRONIC_HTTP_DIR:-$IRONIC_DATA_DIR/httpboot}
+IRONIC_HTTP_SERVER=${IRONIC_HTTP_SERVER:-$(echo "$IRONIC_NETWORK_CONDUCTOR_IP" | cut -d '/' -f 1)}
 IRONIC_HTTP_PORT=${IRONIC_HTTP_PORT:-3928}
 
 # Whether DevStack will be setup for bare metal or VMs
 IRONIC_IS_HARDWARE=$(trueorfalse False IRONIC_IS_HARDWARE)
+
+if [[ -z "$IRONIC_PHYSICAL_INTERFACE" && "$IRONIC_IS_HARDWARE" == "True" ]]; then
+    die $LINENO "IRONIC_PHYSICAL_INTERFACE required to configure ironic \
+physical network in neutron, either set IRONIC_PHYSICAL_INTERFACE to the \
+physical network interface to use for your nodes in local.conf or set \
+IRONIC_IS_HARDWARE=False to create a simulated environment"
+fi
 
 # The first port in the range to bind the Virtual BMCs. The number of
 # ports that will be used depends on $IRONIC_VM_COUNT variable, e.g if
@@ -326,48 +365,6 @@ IRONIC_DHCP_PROVIDER=${IRONIC_DHCP_PROVIDER:-neutron}
 
 # This flag is used to specify enabled network drivers
 IRONIC_ENABLED_NETWORK_INTERFACES=${IRONIC_ENABLED_NETWORK_INTERFACES:-}
-
-# This is the network interface to use for a node
-IRONIC_NETWORK_INTERFACE=${IRONIC_NETWORK_INTERFACE:-}
-
-# Ironic provision network name
-IRONIC_PROVISION_NETWORK_NAME=${IRONIC_PROVISION_NETWORK_NAME:-}
-
-# Provision network provider type. Can be flat or vlan.
-IRONIC_PROVISION_PROVIDER_NETWORK_TYPE=${IRONIC_PROVISION_PROVIDER_NETWORK_TYPE:-'vlan'}
-
-# If IRONIC_PROVISION_PROVIDER_NETWORK_TYPE is vlan. VLAN_ID may be specified. If it is not set,
-# vlan will be allocated dynamically.
-IRONIC_PROVISION_SEGMENTATION_ID=${IRONIC_PROVISION_SEGMENTATION_ID:-}
-
-# Allocation network pool for provision network
-# Example: IRONIC_PROVISION_ALLOCATION_POOL=start=10.0.5.10,end=10.0.5.100
-IRONIC_PROVISION_ALLOCATION_POOL=${IRONIC_PROVISION_ALLOCATION_POOL:-'start=10.0.5.10,end=10.0.5.100'}
-
-# Ironic provision subnet name.
-IRONIC_PROVISION_PROVIDER_SUBNET_NAME=${IRONIC_PROVISION_PROVIDER_SUBNET_NAME:-${IRONIC_PROVISION_NETWORK_NAME}-subnet}
-
-
-# With multinode case all ironic-conductors should have IP from provisioning network.
-# IRONIC_PROVISION_SUBNET_GATEWAY - is configured on primary node.
-# Ironic provision subnet gateway.
-IRONIC_PROVISION_SUBNET_GATEWAY=${IRONIC_PROVISION_SUBNET_GATEWAY:-'10.0.5.1'}
-IRONIC_PROVISION_SUBNET_SUBNODE_IP=${IRONIC_PROVISION_SUBNET_SUBNODE_IP:-'10.0.5.2'}
-
-# Ironic provision subnet prefix
-# Example: IRONIC_PROVISION_SUBNET_PREFIX=10.0.5.0/24
-IRONIC_PROVISION_SUBNET_PREFIX=${IRONIC_PROVISION_SUBNET_PREFIX:-'10.0.5.0/24'}
-
-if [[ "$HOST_TOPOLOGY_ROLE" == 'primary' ]]; then
-    IRONIC_TFTPSERVER_IP=$IRONIC_PROVISION_SUBNET_GATEWAY
-    IRONIC_HTTP_SERVER=$IRONIC_PROVISION_SUBNET_GATEWAY
-fi
-if [[ "$HOST_TOPOLOGY_ROLE" == 'subnode' ]]; then
-    IRONIC_TFTPSERVER_IP=$IRONIC_PROVISION_SUBNET_SUBNODE_IP
-    IRONIC_HTTP_SERVER=$IRONIC_PROVISION_SUBNET_SUBNODE_IP
-fi
-
-IRONIC_HTTP_SERVER=${IRONIC_HTTP_SERVER:-$IRONIC_TFTPSERVER_IP}
 
 # Retrieving logs from the deploy ramdisk
 #
@@ -847,78 +844,11 @@ function configure_ironic_dirs {
 }
 
 function configure_ironic_networks {
-
-    if [[ -n "${IRONIC_PROVISION_NETWORK_NAME}" ]]; then
-        echo_summary "Configuring Ironic provisioning network"
-        configure_ironic_provision_network
-    fi
+    echo_summary "Configuring Ironic provisioning network"
+    iniset $IRONIC_CONF_FILE neutron provisioning_network $IRONIC_PROVISION_NETWORK_NAME
 
     echo_summary "Configuring Ironic cleaning network"
-    configure_ironic_cleaning_network
-}
-
-function configure_ironic_cleaning_network {
-    iniset $IRONIC_CONF_FILE neutron cleaning_network $IRONIC_CLEAN_NET_NAME
-}
-
-function configure_ironic_provision_network {
-    local net_id
-    local ironic_provision_network_ip
-    # NOTE(vsaienko) For multinode case there is no need to create a new provisioning
-    # network on subnode, as it was created on primary node. Just get an existed network UUID.
-    if [[ "$HOST_TOPOLOGY_ROLE" != 'subnode' ]]; then
-        die_if_not_set $LINENO IRONIC_PROVISION_SUBNET_PREFIX "You must specify the IRONIC_PROVISION_SUBNET_PREFIX"
-        die_if_not_set $LINENO PHYSICAL_NETWORK "You must specify the PHYSICAL_NETWORK"
-        die_if_not_set $LINENO IRONIC_PROVISION_SUBNET_GATEWAY "You must specify the IRONIC_PROVISION_SUBNET_GATEWAY"
-
-        net_id=$(openstack network create --provider-network-type $IRONIC_PROVISION_PROVIDER_NETWORK_TYPE \
-            --provider-physical-network "$PHYSICAL_NETWORK" \
-            ${IRONIC_PROVISION_SEGMENTATION_ID:+--provider-segment $IRONIC_PROVISION_SEGMENTATION_ID} \
-            ${IRONIC_PROVISION_NETWORK_NAME} -f value -c id)
-
-        die_if_not_set $LINENO net_id "Failure creating net_id for $IRONIC_PROVISION_NETWORK_NAME"
-        local subnet_id
-        subnet_id="$(openstack subnet create --ip-version 4 \
-            ${IRONIC_PROVISION_ALLOCATION_POOL:+--allocation-pool $IRONIC_PROVISION_ALLOCATION_POOL} \
-            $IRONIC_PROVISION_PROVIDER_SUBNET_NAME \
-            --gateway $IRONIC_PROVISION_SUBNET_GATEWAY --network $net_id \
-            --subnet-range $IRONIC_PROVISION_SUBNET_PREFIX -f value -c id)"
-
-        die_if_not_set $LINENO subnet_id "Failure creating SUBNET_ID for $IRONIC_PROVISION_NETWORK_NAME"
-
-        ironic_provision_network_ip=$IRONIC_PROVISION_SUBNET_GATEWAY
-    else
-        net_id=$(openstack network show $IRONIC_PROVISION_NETWORK_NAME -f value -c id)
-        ironic_provision_network_ip=$IRONIC_PROVISION_SUBNET_SUBNODE_IP
-    fi
-
-    IRONIC_PROVISION_SEGMENTATION_ID=${IRONIC_PROVISION_SEGMENTATION_ID:-`openstack network show ${net_id} -f value -c provider:segmentation_id`}
-    provision_net_prefix=${IRONIC_PROVISION_SUBNET_PREFIX##*/}
-
-    # Set provision network GW on physical interface
-    # Add vlan on br interface in case of IRONIC_PROVISION_PROVIDER_NETWORK_TYPE==vlan
-    # othervise assign ip to br interface directly.
-    if [[ "$IRONIC_PROVISION_PROVIDER_NETWORK_TYPE" == "vlan" ]]; then
-        sudo ip link add link $OVS_PHYSICAL_BRIDGE name $OVS_PHYSICAL_BRIDGE.$IRONIC_PROVISION_SEGMENTATION_ID type vlan id $IRONIC_PROVISION_SEGMENTATION_ID
-        sudo ip link set dev $OVS_PHYSICAL_BRIDGE up
-        sudo ip link set dev $OVS_PHYSICAL_BRIDGE.$IRONIC_PROVISION_SEGMENTATION_ID up
-        sudo ip addr add dev $OVS_PHYSICAL_BRIDGE.$IRONIC_PROVISION_SEGMENTATION_ID $ironic_provision_network_ip/$provision_net_prefix
-    else
-        sudo ip link set dev $OVS_PHYSICAL_BRIDGE up
-        sudo ip addr add dev $OVS_PHYSICAL_BRIDGE $ironic_provision_network_ip/$provision_net_prefix
-    fi
-
-    iniset $IRONIC_CONF_FILE neutron provisioning_network $IRONIC_PROVISION_NETWORK_NAME
-}
-
-function cleanup_ironic_provision_network {
-    # Cleanup OVS_PHYSICAL_BRIDGE subinterfaces
-    local bridge_subint
-    bridge_subint=$(cat /proc/net/dev | sed -n "s/^\(${OVS_PHYSICAL_BRIDGE}\.[0-9]*\).*/\1/p")
-    for sub_int in $bridge_subint; do
-        sudo ip link set dev $sub_int down
-        sudo ip link del dev $sub_int
-    done
+    iniset $IRONIC_CONF_FILE neutron cleaning_network $IRONIC_CLEAN_NETWORK_NAME
 }
 
 # configure_ironic() - Set config files, create data dirs, etc
@@ -1102,10 +1032,10 @@ function configure_ironic_conductor {
         iniset $IRONIC_CONF_FILE glance swift_account AUTH_${tenant_id}
         iniset $IRONIC_CONF_FILE glance swift_container glance
         iniset $IRONIC_CONF_FILE glance swift_temp_url_duration 3600
-        iniset $IRONIC_CONF_FILE glance glance_protocol $GLANCE_SERVICE_PROTOCOL
-        iniset $IRONIC_CONF_FILE glance glance_host $SERVICE_HOST
-        iniset $IRONIC_CONF_FILE glance glance_port $GLANCE_SERVICE_PORT
     fi
+    iniset $IRONIC_CONF_FILE glance glance_protocol $GLANCE_SERVICE_PROTOCOL
+    iniset $IRONIC_CONF_FILE glance glance_host $GLANCE_SERVICE_HOST
+    iniset $IRONIC_CONF_FILE glance glance_port $GLANCE_SERVICE_PORT
 
     if is_deployed_by_agent; then
         iniset $IRONIC_CONF_FILE api ramdisk_heartbeat_timeout 30
@@ -1271,59 +1201,6 @@ function stop_ironic {
     stop_process ir-cond
 }
 
-# create_ovs_taps is also called by the devstack/upgrade/resources.sh script
-#
-# create_ovs_taps ironic_network_id
-# NOTE(vsaienko) Ironic supports only Flat Neutron network.
-# create_ovs_taps are needed in order to provide connectivity from ironic-conductor
-# to VM. With Neutron Flat network it will be not needed.
-function create_ovs_taps {
-    local ironic_net_id
-    ironic_net_id=$1
-    die_if_not_set $LINENO ironic_net_id "Failed to get ironic network id"
-
-    # Work around: No netns exists on host until a Neutron port is created.  We
-    # need to create one in Neutron to know what netns to tap into prior to the
-    # first node booting.
-    local port_id
-    port_id=$(neutron port-create ${ironic_net_id} | grep " id " | get_field 2)
-    # NOTE(vsaienko) openstack port create was introduced in Newton.
-    # Since the function is used during upgrade, it should be backward compatible with Mitaka.
-    # Switch to openstack port create in Ocata release.
-    #port_id=$(openstack port create --network ${ironic_net_id} temp_port -c id -f value)
-    die_if_not_set $LINENO port_id "Failed to create neutron port"
-
-    # intentional sleep to make sure the tag has been set to port
-    sleep 10
-
-    local tapdev
-    tapdev=$(sudo ip netns exec qdhcp-${ironic_net_id} ip link list | grep " tap" | cut -d':' -f2 | cut -d'@' -f1 | cut -b2-)
-    die_if_not_set $LINENO tapdev "Failed to get tap device id"
-    local tag_id
-    tag_id=$(sudo ovs-vsctl get port ${tapdev} tag)
-    die_if_not_set $LINENO tag_id "Failed to get tag id"
-
-    local ovs_tap=ovs-tap
-    local brbm_tap=brbm-tap
-    # make sure veth pair is not existing, otherwise delete its links
-    sudo ip link show $ovs_tap && sudo ip link delete $ovs_tap
-    sudo ip link show $brbm_tap && sudo ip link delete $brbm_tap
-    # create veth pair for future interconnection between br-int and brbm
-    sudo ip link add $brbm_tap type veth peer name $ovs_tap
-    sudo ip link set dev $brbm_tap up
-    sudo ip link set dev $ovs_tap up
-
-    sudo ovs-vsctl -- --if-exists del-port $ovs_tap -- add-port br-int $ovs_tap tag=$tag_id
-    sudo ovs-vsctl -- --if-exists del-port $brbm_tap -- add-port $IRONIC_VM_NETWORK_BRIDGE $brbm_tap
-
-    # Remove the port needed only for workaround.
-    openstack port delete $port_id
-
-    # Finally, share the fixed tenant network across all tenants.  This allows the host
-    # to serve TFTP to a single network namespace via the tap device created above.
-    openstack network set $ironic_net_id --share
-}
-
 function setup_qemu_log_hook {
     # Make sure the libvirt hooks directory exist
     sudo mkdir -p $IRONIC_LIBVIRT_HOOKS_PATH
@@ -1360,67 +1237,6 @@ This can allow you to see some of the content before the screen is cleared by
 an ANSI escape sequence.
 
 EOF
-}
-
-function create_bridge_and_vms {
-    # Call libvirt setup scripts in a new shell to ensure any new group membership
-    sudo su $STACK_USER -c "$IRONIC_SCRIPTS_DIR/setup-network.sh $IRONIC_VM_NETWORK_BRIDGE $PUBLIC_BRIDGE_MTU"
-    if [[ "$IRONIC_VM_LOG_CONSOLE" == "True" ]] ; then
-        local log_arg="-l $IRONIC_VM_LOG_DIR"
-
-        if [[ "$IRONIC_VM_LOG_ROTATE" == "True" ]] ; then
-            setup_qemu_log_hook
-        fi
-    else
-        local log_arg=""
-    fi
-
-    local vbmc_port=$IRONIC_VBMC_PORT_RANGE_START
-    local pdu_outlet=$IRONIC_VPDU_PORT_RANGE_START
-    local vm_name
-    local vm_opts=""
-    if [[ -n "$IRONIC_VM_EMULATOR" ]]; then
-        vm_opts+=" -e $IRONIC_VM_EMULATOR"
-    fi
-    vm_opts+=" -E $IRONIC_VM_ENGINE"
-
-    if [[ "$IRONIC_BOOT_MODE" == "uefi" ]]; then
-        vm_opts+=" -L $UEFI_LOADER_PATH -N $UEFI_NVRAM_PATH"
-    fi
-
-    local bridge_mac
-    bridge_mac=$(ip link show dev $IRONIC_VM_NETWORK_BRIDGE | egrep -o "ether [A-Za-z0-9:]+"|sed "s/ether\ //")
-
-    for vm_name in $(_ironic_bm_vm_names); do
-        sudo -E su $STACK_USER -c "$IRONIC_SCRIPTS_DIR/create-node.sh -n $vm_name \
-            -c $IRONIC_VM_SPECS_CPU -m $IRONIC_VM_SPECS_RAM -d $IRONIC_VM_SPECS_DISK \
-            -a $IRONIC_VM_SPECS_CPU_ARCH -b $IRONIC_VM_NETWORK_BRIDGE $vm_opts -p $vbmc_port -o $pdu_outlet \
-            -i $IRONIC_VM_INTERFACE_COUNT -f $IRONIC_VM_SPECS_DISK_FORMAT  -M $PUBLIC_BRIDGE_MTU $log_arg" >> $IRONIC_VM_MACS_CSV_FILE
-        echo " ${bridge_mac} $IRONIC_VM_NETWORK_BRIDGE" >> $IRONIC_VM_MACS_CSV_FILE
-
-        vbmc_port=$((vbmc_port+1))
-        pdu_outlet=$((pdu_outlet+1))
-    done
-
-    if [[ -z "${IRONIC_PROVISION_NETWORK_NAME}" ]]; then
-        local ironic_net_id
-        ironic_net_id=$(openstack network show "$PRIVATE_NETWORK_NAME" -c id -f value)
-        create_ovs_taps $ironic_net_id
-
-        # NOTE(vsaienko) Neutron no longer setup routing to private network.
-        # https://github.com/openstack-dev/devstack/commit/1493bdeba24674f6634160d51b8081c571df4017
-        # Add route here to have connection to VMs during provisioning.
-        local pub_router_id
-        local r_net_gateway
-        pub_router_id=$(openstack router show $Q_ROUTER_NAME -f value -c id)
-        r_net_gateway=$(sudo ip netns exec qrouter-$pub_router_id ip -4 route get 8.8.8.8 |grep dev | awk '{print $7}')
-        local replace_range=${SUBNETPOOL_PREFIX_V4}
-        if [[ -z "${SUBNETPOOL_V4_ID}" ]]; then
-            replace_range=${FIXED_RANGE}
-        fi
-        sudo ip route replace $replace_range via $r_net_gateway
-    fi
-
 }
 
 function wait_for_nova_resources {
@@ -1506,7 +1322,7 @@ function enroll_nodes {
 
     local total_nodes=0
     local total_cpus=0
-
+    local ironic_api_version='--ironic-api-version latest'
     while read hardware_info; do
         local node_capabilities=""
         if [[ "$IRONIC_BOOT_MODE" == "uefi" ]]; then
@@ -1528,18 +1344,13 @@ function enroll_nodes {
             fi
             # Local-link-connection options
             local llc_opts=""
-            if [[ "${IRONIC_USE_LINK_LOCAL}" == "True" ]]; then
-                local switch_info
-                local switch_id
+            local switch_info
+            local switch_id
 
-                switch_id=$(echo $hardware_info |awk '{print $4}')
-                switch_info=$(echo $hardware_info |awk '{print $5}')
+            switch_id=$(echo $hardware_info |awk '{print $4}')
+            switch_info=$(echo $hardware_info |awk '{print $5}')
 
-                # NOTE(vsaienko) we will add port_id later in the code.
-                llc_opts="-l switch_id=${switch_id} -l switch_info=${switch_info} "
-
-                local ironic_api_version='--ironic-api-version latest'
-            fi
+            llc_opts="-l switch_id=${switch_id} -l switch_info=${switch_info} "
         else
             # Currently we require all hardware platform have same CPU/RAM/DISK info
             # in future, this can be enhanced to support different type, and then
@@ -1648,22 +1459,18 @@ function enroll_nodes {
             local llc_port_opt=""
             mac_address=$(echo $info| awk -F ',' '{print $1}')
             port_id=$(echo $info| awk -F ',' '{print $2}')
-            if [[ "${IRONIC_USE_LINK_LOCAL}" == "True" ]]; then
-                llc_port_opt+=" -l port_id=${port_id} "
-            fi
+            llc_port_opt+=" -l port_id=${port_id} "
             ironic $ironic_api_version port-create --address $mac_address --node $node_id $llc_opts $llc_port_opt
         done
 
         # NOTE(vsaienko) use node-update instead of specifying network_interface
         # during node creation. If node is added with latest version of API it
         # will NOT go to available state automatically.
-        if [[ -n "${IRONIC_NETWORK_INTERFACE}" ]]; then
-            local n_id
-            ironic node-set-maintenance $node_id true
-            n_id=$(ironic $ironic_api_version node-update $node_id add network_interface=$IRONIC_NETWORK_INTERFACE | grep " uuid " | awk '{ print $4; }')
-            die_if_not_set $LINENO n_id "Failed to update network interface for node"
-            ironic node-set-maintenance $node_id false
-        fi
+        local n_id
+        ironic node-set-maintenance $node_id true
+        n_id=$(ironic --ironic-api-version latest node-update $node_id add network_interface=$IRONIC_NODE_NETWORK_INTERFACE | grep " uuid " | awk '{ print $4; }')
+        die_if_not_set $LINENO n_id "Failed to update network interface for node"
+        ironic node-set-maintenance $node_id false
 
         local resource_class
         if [[ "$IRONIC_USE_RESOURCE_CLASSES" == "True" ]]; then
@@ -2006,10 +1813,20 @@ function cleanup_baremetal_basic_ops {
         done
     done
 
+    if [[ "$HOST_TOPOLOGY_ROLE" == "subnode" ]]; then
+        node_id=$(echo $HOST_IP | cut -d '.' -f 4)
+    fi
+    local vswitch_name="bmswitch$(node_id)"
+    sudo ip link del dev bminthost
+    sudo ip link del dev bmintswitch
+    sudo ip link del dev bmcondswitch
+    sudo ip link del dev bmcondhost
+    sudo ovs-vsctl del-br $vswitch_name
+
     # Clean up VXLAN network if we're running in a multinode environment
-    sudo ovs-vsctl del-port ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
-    sudo ovs-vsctl del-port vxlan_${IRONIC_VM_NETWORK_BRIDGE}
-    sudo ip link del dev ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
+    sudo ovs-vsctl del-port ${vswitch_name}_vxlan
+    sudo ovs-vsctl del-port vxlan_${vswitch_name}
+    sudo ip link del dev ${vswitch_name}_vxlan
 
     if [[ "$HOST_TOPOLOGY_ROLE" == "primary" ]]; then
         local id
@@ -2021,7 +1838,7 @@ function cleanup_baremetal_basic_ops {
         sudo ip link del dev bmswitchup
     fi
 
-    sudo ovs-vsctl --if-exists del-br $IRONIC_VM_NETWORK_BRIDGE
+    sudo ovs-vsctl --if-exists del-br $IRONIC_PHYSICAL_NETWORK
 
     sudo rm -rf /etc/xinetd.d/tftp /etc/init/tftpd-hpa.override
     restart_service xinetd
@@ -2053,15 +1870,12 @@ function ironic_configure_tempest {
         iniset $TEMPEST_CONFIG compute flavor_ref_alt $bm_flavor_id
         iniset $TEMPEST_CONFIG compute-feature-enabled disk_config False
     fi
-    # NOTE(jlvillal): If IRONIC_PROVISION_NETWORK_NAME is set it means that
-    # nodes are using the neutron network driver / multi-tenant networking.
-    # Otherwise we are using a flat-network.
-    if [[ -n "${IRONIC_PROVISION_NETWORK_NAME}" ]]; then
-        # multi-tenant networking
+
+    if [[ "${IRONIC_NODE_NETWORK_INTERFACE}" == "neutron" ]]; then
         iniset $TEMPEST_CONFIG baremetal use_provision_network True
     else
         # flat-network
-        iniset $TEMPEST_CONFIG compute fixed_network_name $PRIVATE_NETWORK_NAME
+        iniset $TEMPEST_CONFIG compute fixed_network_name $IRONIC_PROVISION_NETWORK_NAME
         # NOTE(jroll) this disables multitenant network tests from tempest's
         # tree, but not from our tree. This is a bit inconsistent, we should
         # fix it.
@@ -2114,35 +1928,11 @@ function get_ironic_node_prefix {
     echo $node_prefix
 }
 
-function setup_vxlan_network {
-    local old_vxlan_bridge
-    old_vxlan_bridge=$(sudo ovs-vsctl show | grep br_ironic_vxlan)
-
-    if [[ -n "${old_vxlan_bridge}" ]]; then
-        # If vxlan bridge already exists just plumb that and return
-        sudo ip link add dev ${IRONIC_VM_NETWORK_BRIDGE}_vxlan type veth peer name vxlan_${IRONIC_VM_NETWORK_BRIDGE}
-        sudo ip link set ${IRONIC_VM_NETWORK_BRIDGE}_vxlan up
-        sudo ip link set vxlan_${IRONIC_VM_NETWORK_BRIDGE} up
-        sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
-        sudo ovs-vsctl add-port br_ironic_vxlan vxlan_${IRONIC_VM_NETWORK_BRIDGE}
-        return
-    fi
-
-    # Connect multinode bmswitchs together with a tunnel to simulate a single physical network
-    # We use a VXLAN tunnel because some CI node providers don't allow GRE
-    # Neutron defaults to vxlans 1-1000 in devstack so we use 20000 to avoid conflicts
-    if [[ "$HOST_TOPOLOGY_ROLE" == "primary" ]]; then
-        local id
-        for node in $HOST_TOPOLOGY_SUBNODES; do
-            id=$(echo $node | cut -d '.' -f 4)
-            sudo ip link add bmswdown$id type vxlan id 20000 remote $node local $HOST_IP dstport 4789
-            sudo ip link set bmswdown$id up
-            sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE bmswdown$id
-        done
-    elif [[ "$HOST_TOPOLOGY_ROLE" == "subnode" ]]; then
-        sudo ip link add bmswitchup type vxlan id 20000 remote $SERVICE_HOST local $HOST_IP dstport 4789
-        sudo ip link set bmswitchup up
-        sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE bmswitchup
+function configure_conductor_network_interface {
+    local ironic_physical_ip
+    ironic_physical_ip=$(ip addr show dev $IRONIC_PHYSICAL_CONDUCTOR_INTERFACE | grep $IRONIC_NETWORK_CONDUCTOR_IP | cut -d ' ' -f 6)
+    if [[ -z "$ironic_physical_ip" ]]; then
+        sudo ip addr add $IRONIC_NETWORK_CONDUCTOR_IP dev $IRONIC_PHYSICAL_CONDUCTOR_INTERFACE
     fi
 }
 

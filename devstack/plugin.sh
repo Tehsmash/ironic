@@ -6,6 +6,8 @@
 
 echo_summary "ironic devstack plugin.sh called: $1/$2"
 source $DEST/ironic/devstack/lib/ironic
+source $DEST/ironic/devstack/lib/ironic-simulation
+source $DEST/ironic/devstack/lib/ironic-neutron
 
 # These packages should be tested under python 3, when the job enables Python 3
 # TODO(jlvillal) Add additional dependencies when they should support Python 3.
@@ -35,6 +37,18 @@ if is_service_enabled ir-api ir-cond; then
                 create_ironic_accounts
             fi
 
+            if [[ "$IRONIC_BAREMETAL_BASIC_OPS" == "True" && "$IRONIC_IS_HARDWARE" == "False" ]]; then
+                echo_summary "Creating simulated baremetal environment"
+                create_simulated_baremetal_environment
+            fi
+
+            configure_conductor_network_interface
+
+            if is_service_enabled neutron; then
+                echo_summary "Configuring ironic physical network in neutron config"
+                ironic_configure_neutron_physical_network
+            fi
+
         elif [[ "$2" == "extra" ]]; then
         # stack/extra - Called near the end after layer 1 and 2 services have
         # been started.
@@ -42,17 +56,13 @@ if is_service_enabled ir-api ir-cond; then
             # Initialize ironic
             init_ironic
 
-            if [[ "$IRONIC_BAREMETAL_BASIC_OPS" == "True" && "$IRONIC_IS_HARDWARE" == "False" ]]; then
-                echo_summary "Creating bridge and VMs"
-                create_bridge_and_vms
-            fi
-
-            if is_service_enabled neutron || [[ "$HOST_TOPOLOGY" == "multinode" ]]; then
-                echo_summary "Configuring Ironic networks"
+            if is_service_enabled neutron; then
+                echo_summary "Creating ironic networks in neutron"
+                if [[ "$HOST_TOPOLOGY_ROLE" != "subnode" ]]; then
+                    ironic_create_networks_in_neutron
+                fi
+                echo_summary "Configuring neutron networks in ironic config"
                 configure_ironic_networks
-            fi
-            if [[ "$HOST_TOPOLOGY" == 'multinode' ]]; then
-                setup_vxlan_network
             fi
 
             # Start the ironic API and ironic taskmgr components

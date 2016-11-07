@@ -5,6 +5,6 @@ enable_service ironic ir-api ir-cond
 # and caused https://bugs.launchpad.net/ironic/+bug/1631875
 # Get the smallest local MTU
 local_mtu=$(ip link show | sed -ne 's/.*mtu \([0-9]\+\).*/\1/p' | sort -n | head -1)
-# 50 bytes is overhead for vxlan (which is greater than GRE
-# allowing us to use either overlay option with this MTU.
-PUBLIC_BRIDGE_MTU=$((local_mtu - 50))
+# Max packet size - VXLAN header 14 - vlan header 4 - eth header 14 - IPv6
+# header 40 = 1428
+PUBLIC_BRIDGE_MTU=$((local_mtu - 72))

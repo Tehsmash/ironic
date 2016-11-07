@@ -1,0 +1,66 @@
+#!/bin/bash
+
+function ironic_configure_neutron_physical_network {
+    if [[ "$Q_AGENT" == "openvswitch" ]]; then
+        ironic_configure_neutron_ironic_ovs_bridge
+    else
+        die $LINENO "Unsupported neutron Q_AGENT only openvswitch is supported."
+    fi
+    if [[ "$IRONIC_PHYSICAL_NETWORK_TYPE" == "flat" ]]; then
+        ironic_configure_neutron_flat_network
+    elif [[ "$IRONIC_PHYSICAL_NETWORK_TYPE" == "vlan" ]]; then
+        ironic_configure_neutron_vlan_network
+    else
+        die $LINENO "Unsupported network type provided ${IRONIC_PHYSICAL_NETWORK_TYPE} only vlan and flat are supported."
+    fi
+}
+
+function ironic_configure_neutron_ironic_ovs_bridge {
+    sudo ovs-vsctl add-br $IRONIC_PHYSICAL_NETWORK
+    local ironic_physical_ip
+    ironic_physical_ip=$(ip addr show dev $IRONIC_PHYSICAL_INTERFACE | grep $IRONIC_NETWORK_CONDUCTOR_IP | cut -d ' ' -f 6)
+    if [[ -n "$ironic_physical_ip" ]]; then
+        # Remove IP address from physical interface so we can assign it to the bridge
+        sudo ip addr del $IRONIC_NETWORK_CONDUCTOR_IP dev $IRONIC_PHYSICAL_INTERFACE
+        sudo ip addr add $IRONIC_NETWORK_CONDUCTOR_IP dev $IRONIC_PHYSICAL_NETWORK
+    fi
+    sudo ip link set $IRONIC_PHYSICAL_NETWORK up
+    sudo ovs-vsctl add-port $IRONIC_PHYSICAL_NETWORK $IRONIC_PHYSICAL_INTERFACE
+    OVS_BRIDGE_MAPPINGS="${OVS_BRIDGE_MAPPINGS},${IRONIC_PHYSICAL_NETWORK}:${IRONIC_PHYSICAL_NETWORK}"
+    iniset /$Q_PLUGIN_CONF_FILE ovs bridge_mappings $OVS_BRIDGE_MAPPINGS
+}
+
+function ironic_configure_neutron_flat_network {
+    # Append flat networks here to ensure that we don't affect anything
+    # that the neutron devstack plugin has done.
+    if [[ -z "$Q_ML2_PLUGIN_FLAT_TYPE_OPTIONS" ]]; then
+        Q_ML2_PLUGIN_FLAT_TYPE_OPTIONS="flat_networks=$IRONIC_PHYSICAL_NETWORK"
+    else
+        Q_ML2_PLUGIN_FLAT_TYPE_OPTIONS+="$IRONIC_PHYSICAL_NETWORK"
+    fi
+    populate_ml2_config /$Q_PLUGIN_CONF_FILE ml2_type_flat $Q_ML2_PLUGIN_FLAT_TYPE_OPTIONS
+}
+
+function ironic_configure_neutron_vlan_network {
+    local lower_tenant_vlan
+    lower_tenant_vlan=$(($IRONIC_PHYSICAL_NETWORK_SEG_MIN + 1))
+    # Override this option in the Neutron configuration to ensure that only the
+    # Ironic physical network is used for tenant VLANs because we currently
+    # don't support physnet mapping and scheduling placement in Ironic.
+    Q_ML2_PLUGIN_VLAN_TYPE_OPTIONS="network_vlan_ranges=$IRONIC_PHYSICAL_NETWORK:$lower_tenant_vlan:$IRONIC_PHYSICAL_NETWORK_SEG_MAX"
+    populate_ml2_config /$Q_PLUGIN_CONF_FILE ml2_type_vlan $Q_ML2_PLUGIN_VLAN_TYPE_OPTIONS
+}
+
+function ironic_create_networks_in_neutron {
+    local net_id
+    local subnet_id
+    if [[ "$IRONIC_PHYSICAL_NETWORK_TYPE" == "flat" ]]; then
+        net_id=$(openstack network create $IRONIC_PROVISION_NETWORK_NAME --share --provider-network-type flat --provider-physical-network $IRONIC_PHYSICAL_NETWORK -f value -c id)
+    elif [[ "$IRONIC_PHYSICAL_NETWORK_TYPE" == "vlan" ]]; then
+        net_id=$(openstack network create $IRONIC_PROVISION_NETWORK_NAME --share --provider-network-type vlan --provider-physical-network $IRONIC_PHYSICAL_NETWORK --provider-segment $IRONIC_PROVISION_NETWORK_SEG -f value -c id)
+    fi
+    die_if_not_set $LINENO net_id "Failed to create Neutron ${IRONIC_PHYSICAL_NETWORK_TYPE} network ${IRONIC_PROVISION_NETWORK_NAME}"
+    subnet_id=$(openstack subnet create $IRONIC_PROVISION_NETWORK_SUBNET_NAME --dhcp --network $IRONIC_PROVISION_NETWORK_NAME --subnet-range $IRONIC_PROVISION_NETWORK_SUBNET_CIDR --allocation-pool start=$IRONIC_NETWORK_ALLOCATION_MIN,end=$IRONIC_NETWORK_ALLOCATION_MAX -f value -c id)
+    die_if_not_set $LINENO subnet_id "Failed to create Neutron subnet $IRONIC_PROVISION_NETWORK_SUBNET_NAME"
+    neutron router-interface-add $Q_ROUTER_NAME $subnet_id
+}
