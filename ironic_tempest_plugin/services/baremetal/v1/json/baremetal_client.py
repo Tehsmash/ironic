@@ -372,3 +372,34 @@ class BaremetalClient(base.BaremetalClient):
                                        enabled)
         self.expected_success(202, resp.status)
         return resp, body
+
+    @base.handle_errors
+    def vif_list(self, node_uuid):
+        """Get list of attached VIF ids.
+
+        :param node_uuid: Unique identifier of the node in UUID format.
+        """
+        return self._list_request('nodes/%s/vifs' % node_uuid)
+
+    @base.handle_errors
+    def vif_attach(self, node_uuid, vif_id):
+        """Attach a VIF to a node
+
+        :param node_uuid: Unique identifier of the node in UUID format.
+        :param vif_id: An ID representing the VIF
+        """
+        vif = {'id': vif_id}
+        resp, body = self._create_request('nodes/%s/vifs' % node_uuid, vif)
+        self.expected_success(204, resp.status)
+        return resp, body
+
+    @base.handle_errors
+    def vif_detach(self, node_uuid, vif_id):
+        """Detach a VIF from a node
+
+        :param node_uuid: Unique identifier of the node in UUID format.
+        :param vif_id: An ID representing the VIF
+        """
+        resp, body = self._delete_request('nodes/%s/vifs' % node_uuid, vif_id)
+        self.expected_success(204, resp.status)
+        return resp, body

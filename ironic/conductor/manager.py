@@ -2345,7 +2345,7 @@ class ConductorManager(base_manager.BaseConductorManager):
         with task_manager.acquire(context, node_id,
                                   purpose='attach vif') as task:
             task.driver.network.validate(task)
-            return task.driver.network.vif_attach(task, vif_obj)
+            task.driver.network.vif_attach(task, vif_obj)
 
     @METRICS.timer('ConductorManager.vif_detach')
     @messaging.expected_exceptions(exception.NodeLocked,
@@ -2365,7 +2365,7 @@ class ConductorManager(base_manager.BaseConductorManager):
         with task_manager.acquire(context, node_id,
                                   purpose='detach vif') as task:
             task.driver.network.validate(task)
-            return task.driver.network.vif_detach(task, vif_id)
+            task.driver.network.vif_detach(task, vif_id)
 
     def _object_dispatch(self, target, method, context, args, kwargs):
         """Dispatch a call to an object method.

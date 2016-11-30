@@ -2,6 +2,10 @@
 REST API Version History
 ========================
 
+**1.26**
+
+    Add '/v1/nodes/vifs' endpoint for attach, detach and list of VIFs.
+
 **1.25**
 
     Add possibility to unset chassis_uuid from a node.

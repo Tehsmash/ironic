@@ -96,20 +96,11 @@ class BaremetalBasicOps(baremetal_manager.BaremetalScenarioTest):
             return None
         return int(ephemeral)
 
-    def validate_ports(self):
-        for port in self.get_ports(self.node['uuid']):
-            n_port_id = port['extra']['vif_port_id']
-            body = self.ports_client.show_port(n_port_id)
-            n_port = body['port']
-            self.assertEqual(n_port['device_id'], self.instance['id'])
-            self.assertEqual(n_port['mac_address'], port['address'])
-
     @test.idempotent_id('549173a5-38ec-42bb-b0e2-c8b9f4a08943')
     @test.services('baremetal', 'compute', 'image', 'network')
     def test_baremetal_server_ops(self):
         self.add_keypair()
         self.instance, self.node = self.boot_instance()
-        self.validate_ports()
         ip_address = self.get_server_ip(self.instance)
         self.get_remote_client(ip_address).validate_authentication()
         vm_client = self.get_remote_client(ip_address)

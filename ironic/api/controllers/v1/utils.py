@@ -427,6 +427,16 @@ def allow_remove_chassis_uuid():
             versions.MINOR_25_UNSET_CHASSIS_UUID)
 
 
+def allow_vifs_subcontroller():
+    """Check if node/vifs can be used.
+
+    Version 1.26 of the API added support for VIFs to be
+    attached to Nodes.
+    """
+    return (pecan.request.version.minor >=
+            versions.MINOR_26_VIFS_SUBCONTROLLER)
+
+
 def get_controller_reserved_names(cls):
     """Get reserved names for a given controller.
 

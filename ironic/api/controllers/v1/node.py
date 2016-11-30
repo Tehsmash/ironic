@@ -1043,6 +1043,96 @@ class NodeMaintenanceController(rest.RestController):
         self._set_maintenance(node_ident, False)
 
 
+class Vif(wtypes.UserType):
+
+    basetype = wtypes.text
+    name = 'vif'
+
+    _mandatory_fields = {'id': types.uuid_or_name}
+
+    @staticmethod
+    def validate(value):
+        value = types.JsonType.validate(value)
+        for key, typ in Vif._mandatory_fields.items():
+            if key not in value:
+                raise exception.MissingParameterValue('Missing %s' % key)
+            value[key] = wsme.rest.json.fromjson(typ, value[key])
+        return value
+
+    @staticmethod
+    def frombasetype(value):
+        if value is None:
+            return None
+        return Vif.validate(value)
+
+
+viftype = Vif()
+
+
+class VifCollection(wtypes.Base):
+
+    vifs = [viftype]
+
+    @staticmethod
+    def collection_from_list(vifs):
+        col = VifCollection()
+        col.vifs = [Vif.frombasetype(vif) for vif in vifs]
+        return col
+
+
+class NodeVIFController(rest.RestController):
+
+    def __init__(self, node_ident):
+        self.node_ident = node_ident
+
+    def _get_node_and_topic(self):
+        rpc_node = api_utils.get_rpc_node(self.node_ident)
+        try:
+            return rpc_node, pecan.request.rpcapi.get_topic_for(rpc_node)
+        except exception.NoValidHost as e:
+            e.code = http_client.BAD_REQUEST
+            raise
+
+    @METRICS.timer('NodesVIFController.get_all')
+    @expose.expose(VifCollection)
+    def get_all(self):
+        """Get a list of attached VIF IDs"""
+        cdict = pecan.request.context.to_dict()
+        policy.authorize('baremetal:node:vif:list', cdict, cdict)
+        rpc_node, topic = self._get_node_and_topic()
+        vifs = pecan.request.rpcapi.vif_list(pecan.request.context,
+                                             rpc_node.uuid, topic=topic)
+        return VifCollection.collection_from_list(vifs)
+
+    @METRICS.timer('NodesVIFController.post')
+    @expose.expose(None, body=viftype,
+                   status_code=http_client.NO_CONTENT)
+    def post(self, vif):
+        """Attach a VIF to this node
+
+        :param vif: A VIF object to attach
+        """
+        cdict = pecan.request.context.to_dict()
+        policy.authorize('baremetal:node:vif:attach', cdict, cdict)
+        rpc_node, topic = self._get_node_and_topic()
+        pecan.request.rpcapi.vif_attach(pecan.request.context, rpc_node.uuid,
+                                        vif_obj=vif, topic=topic)
+
+    @METRICS.timer('NodesVIFController.delete')
+    @expose.expose(None, types.uuid_or_name,
+                   status_code=http_client.NO_CONTENT)
+    def delete(self, vif_id):
+        """Detach a VIF from this node
+
+        :param vif_id: The ID of a VIF to detach
+        """
+        cdict = pecan.request.context.to_dict()
+        policy.authorize('baremetal:node:vif:detach', cdict, cdict)
+        rpc_node, topic = self._get_node_and_topic()
+        pecan.request.rpcapi.vif_detach(pecan.request.context, rpc_node.uuid,
+                                        vif_id=vif_id, topic=topic)
+
+
 class NodesController(rest.RestController):
     """REST controller for Nodes."""
 
@@ -1081,6 +1171,7 @@ class NodesController(rest.RestController):
     _subcontroller_map = {
         'ports': port.PortsController,
         'portgroups': portgroup.PortgroupsController,
+        'vifs': NodeVIFController
     }
 
     @pecan.expose()
@@ -1089,13 +1180,16 @@ class NodesController(rest.RestController):
             ident = types.uuid_or_name.validate(ident)
         except exception.InvalidUuidOrName as e:
             pecan.abort(http_client.BAD_REQUEST, e.args[0])
-        if remainder:
-            subcontroller = self._subcontroller_map.get(remainder[0])
-            if subcontroller:
-                if (remainder[0] == 'portgroups' and
-                        not api_utils.allow_portgroups_subcontrollers()):
-                    pecan.abort(http_client.NOT_FOUND)
-                return subcontroller(node_ident=ident), remainder[1:]
+        if not remainder:
+            return
+        if ((remainder[0] == 'portgroups' and
+                not api_utils.allow_portgroups_subcontrollers()) or
+            (remainder[0] == 'vifs' and
+                not api_utils.allow_vifs_subcontroller())):
+            pecan.abort(http_client.NOT_FOUND)
+        subcontroller = self._subcontroller_map.get(remainder[0])
+        if subcontroller:
+            return subcontroller(node_ident=ident), remainder[1:]
 
     def _get_nodes_collection(self, chassis_uuid, instance_uuid, associated,
                               maintenance, provision_state, marker, limit,
