@@ -38,6 +38,7 @@ def get_node_vif_ids(task):
         # network
         vif = (portgroup.internal_info.get('cleaning_vif_port_id') or
                portgroup.internal_info.get('provisioning_vif_port_id') or
+               portgroup.internal_info.get('tenant_vif_port_id') or
                portgroup.extra.get('vif_port_id'))
         if vif:
             portgroup_vifs[portgroup.uuid] = vif
@@ -45,6 +46,7 @@ def get_node_vif_ids(task):
     for port in task.ports:
         vif = (port.internal_info.get('cleaning_vif_port_id') or
                port.internal_info.get('provisioning_vif_port_id') or
+               port.internal_info.get('tenant_vif_port_id') or
                port.extra.get('vif_port_id'))
         if vif:
             port_vifs[port.uuid] = vif

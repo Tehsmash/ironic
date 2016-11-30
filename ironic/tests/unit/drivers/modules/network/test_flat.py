@@ -22,6 +22,7 @@ from ironic.tests.unit.db import base as db_base
 from ironic.tests.unit.objects import utils
 
 CONF = cfg.CONF
+VIFMIXINPATH = 'ironic.drivers.modules.network.common.VIFPortIDMixin'
 
 
 class TestFlatInterface(db_base.DbTestCase):
@@ -36,6 +37,33 @@ class TestFlatInterface(db_base.DbTestCase):
             self.context, node_id=self.node.id,
             internal_info={
                 'cleaning_vif_port_id': uuidutils.generate_uuid()})
+
+    @mock.patch('%s.vif_list' % VIFMIXINPATH)
+    def test_vif_list(self, mock_vif_list):
+        with task_manager.acquire(self.context, self.node.id) as task:
+            self.interface.vif_list(task)
+            mock_vif_list.assert_called_once_with(task)
+
+    @mock.patch('%s.vif_attach' % VIFMIXINPATH)
+    def test_vif_attach(self, mock_vif_attach):
+        vif = mock.MagicMock()
+        with task_manager.acquire(self.context, self.node.id) as task:
+            self.interface.vif_attach(task, vif)
+            mock_vif_attach.assert_called_once_with(task, vif)
+
+    @mock.patch('%s.vif_detach' % VIFMIXINPATH)
+    def test_vif_detach(self, mock_vif_detach):
+        vif_id = "vif"
+        with task_manager.acquire(self.context, self.node.id) as task:
+            self.interface.vif_detach(task, vif_id)
+            mock_vif_detach.assert_called_once_with(task, vif_id)
+
+    @mock.patch('%s.port_changed' % VIFMIXINPATH)
+    def test_vif_port_changed(self, mock_p_changed):
+        port = mock.MagicMock()
+        with task_manager.acquire(self.context, self.node.id) as task:
+            self.interface.port_changed(task, port)
+            mock_p_changed.assert_called_once_with(task, port)
 
     @mock.patch.object(flat_interface, 'LOG')
     def test_init_incorrect_cleaning_net(self, mock_log):
@@ -83,9 +111,3 @@ class TestFlatInterface(db_base.DbTestCase):
                 'cleaning network')
         self.port.refresh()
         self.assertNotIn('cleaning_vif_port_id', self.port.internal_info)
-
-    def test_unconfigure_tenant_networks(self):
-        with task_manager.acquire(self.context, self.node.id) as task:
-            self.interface.unconfigure_tenant_networks(task)
-            self.port.refresh()
-            self.assertNotIn('vif_port_id', self.port.extra)

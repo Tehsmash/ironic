@@ -16,6 +16,41 @@ from ironic.drivers import base
 class NoopNetwork(base.NetworkInterface):
     """Noop network interface."""
 
+    def port_changed(self, port_obj):
+        """Handle any actions required when a port changes
+
+        :param task: a TaskManager instance.
+        :param port: a changed Port object.
+        :raises: Conflict, FailedToUpdateDHCPOptOnPort
+        """
+        pass
+
+    def vif_attach(self, task, vif):
+        """Attach a virtual network interface to a node
+
+        :param task: A TaskManager instance.
+        :param vif: A VIF object to attach
+        :raises: NetworkError
+        """
+        pass
+
+    def vif_detach(self, task, vif_id):
+        """Detach a virtual network interface from a node
+
+        :param task: A TaskManager instance.
+        :param vif_id: A VIF ID to detach
+        :raises: NetworkError
+        """
+        pass
+
+    def vif_list(self, task):
+        """List attached VIF IDs for a node.
+
+        :param task: A TaskManager instance.
+        :raises: NetworkError
+        """
+        pass
+
     def add_provisioning_network(self, task):
         """Add the provisioning network to a node.
 

@@ -513,3 +513,86 @@ class TestValidateNetwork(base.TestCase):
                                neutron.validate_network, 'name')
         net_mock.assert_called_once_with(fields=['id'],
                                          name='name')
+
+
+@mock.patch.object(neutron, 'get_client', autospec=True)
+class TestUpdatePortAddress(base.TestCase):
+
+    def test_update_port_address(self, mock_client):
+        address = 'fe:54:00:77:07:d9'
+        port_id = 'fake-port-id'
+        expected = {'port': {'mac_address': address}}
+        mock_client.return_value.show_port.return_value = {}
+
+        neutron.update_port_address(port_id, address)
+        mock_client.return_value.update_port.assert_called_once_with(port_id,
+                                                                     expected)
+
+    def test_update_port_address_with_binding(self, mock_client):
+        address = 'fe:54:00:77:07:d9'
+        port_id = 'fake-port-id'
+        expected = {'port': {'mac_address': address,
+                             'binding:host_id': 'host'}}
+        mock_client.return_value.show_port.return_value = {
+            'port': {'binding:host_id': 'host'}}
+
+        neutron.update_port_address(port_id, address)
+        mock_client.return_value.update_port.assert_any_call(
+            port_id, {'port': {'binding:host_id': ''}})
+        mock_client.return_value.update_port.assert_any_call(port_id, expected)
+
+    def test_update_port_address_show_failed(self, mock_client):
+        address = 'fe:54:00:77:07:d9'
+        port_id = 'fake-port-id'
+        mock_client.return_value.show_port.side_effect = (
+            neutron_client_exc.NeutronClientException())
+
+        self.assertRaises(exception.FailedToUpdateMacOnPort,
+                          neutron.update_port_address, port_id, address)
+        self.assertFalse(mock_client.return_value.update_port.called)
+
+    def test_update_port_address_with_exception(self, mock_client):
+        address = 'fe:54:00:77:07:d9'
+        port_id = 'fake-port-id'
+        mock_client.return_value.show_port.return_value = {}
+        mock_client.return_value.update_port.side_effect = (
+            neutron_client_exc.NeutronClientException())
+
+        self.assertRaises(exception.FailedToUpdateMacOnPort,
+                          neutron.update_port_address,
+                          port_id, address)
+
+
+@mock.patch.object(neutron, 'get_client', autospec=True)
+class TestUnbindPort(base.TestCase):
+
+    def test_unbind_neutron_port(self, mock_client):
+        port_id = 'fake-port-id'
+        token = 'token'
+        body = {
+            'port': {
+                'binding:host_id': '',
+                'binding:profile': {}
+            }
+        }
+        neutron.unbind_neutron_port(port_id, token)
+        mock_client.assert_called_once_with(token)
+        mock_client.return_value.update_port.assert_called_once_with(port_id,
+                                                                     body)
+
+    def test_unbind_neutron_port_failure(self, mock_client):
+        mock_client.return_value.update_port.side_effect = (
+            neutron_client_exc.NeutronClientException())
+        body = {
+            'port': {
+                'binding:host_id': '',
+                'binding:profile': {}
+            }
+        }
+        port_id = 'fake-port-id'
+        token = 'token'
+        self.assertRaises(exception.NetworkError, neutron.unbind_neutron_port,
+                          port_id, token)
+        mock_client.assert_called_once_with(token)
+        mock_client.return_value.update_port.assert_called_once_with(port_id,
+                                                                     body)

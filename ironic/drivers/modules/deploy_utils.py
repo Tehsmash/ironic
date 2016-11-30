@@ -540,6 +540,7 @@ def get_single_nic_with_vif_port_id(task):
     for port in task.ports:
         if (port.internal_info.get('cleaning_vif_port_id') or
                 port.internal_info.get('provisioning_vif_port_id') or
+                port.internal_info.get('tenant_vif_port_id') or
                 port.extra.get('vif_port_id')):
             return port.address
 
