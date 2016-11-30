@@ -82,7 +82,7 @@ class ConductorManager(base_manager.BaseConductorManager):
     """Ironic Conductor manager main class."""
 
     # NOTE(rloo): This must be in sync with rpcapi.ConductorAPI's.
-    RPC_API_VERSION = '1.37'
+    RPC_API_VERSION = '1.38'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -1708,7 +1708,9 @@ class ConductorManager(base_manager.BaseConductorManager):
                                    exception.MACAlreadyExists,
                                    exception.InvalidState,
                                    exception.FailedToUpdateDHCPOptOnPort,
-                                   exception.Conflict)
+                                   exception.Conflict,
+                                   exception.InvalidParameterValue,
+                                   exception.NetworkError)
     def update_port(self, context, port_obj):
         """Update a port.
 
@@ -1732,11 +1734,6 @@ class ConductorManager(base_manager.BaseConductorManager):
         with task_manager.acquire(context, port_obj.node_id,
                                   purpose='port update') as task:
             node = task.node
-            portgroup_obj = None
-            if port_obj.portgroup_id:
-                portgroup_obj = [pg for pg in task.portgroups if
-                                 pg.id == port_obj.portgroup_id][0]
-
             # Only allow updating MAC addresses for active nodes if maintenance
             # mode is on.
             if ((node.provision_state == states.ACTIVE or node.instance_uuid)
@@ -1773,58 +1770,8 @@ class ConductorManager(base_manager.BaseConductorManager):
                               'connect': ', '.join(connectivity_attr),
                               'allowed': ', '.join(allowed_update_states)})
 
-            if 'address' in port_obj.obj_what_changed():
-                vif = port_obj.extra.get('vif_port_id')
-                if vif:
-                    api = dhcp_factory.DHCPFactory()
-                    api.provider.update_port_address(vif, port_obj.address,
-                                                     token=context.auth_token)
-                # Log warning if there is no vif_port_id and an instance
-                # is associated with the node.
-                elif node.instance_uuid:
-                    LOG.warning(_LW(
-                        "No VIF found for instance %(instance)s "
-                        "port %(port)s when attempting to update port MAC "
-                        "address."),
-                        {'port': port_uuid, 'instance': node.instance_uuid})
-
-            vif = port_obj.extra.get('vif_port_id')
-            if 'extra' in port_obj.obj_what_changed():
-                orignal_port = objects.Port.get_by_id(context, port_obj.id)
-                updated_client_id = port_obj.extra.get('client-id')
-                if (orignal_port.extra.get('client-id') !=
-                    updated_client_id):
-                    # DHCP Option with opt_value=None will remove it
-                    # from the neutron port
-                    if vif:
-                        api = dhcp_factory.DHCPFactory()
-                        client_id_opt = {'opt_name': 'client-id',
-                                         'opt_value': updated_client_id}
-
-                        api.provider.update_port_dhcp_opts(
-                            vif, [client_id_opt], token=context.auth_token)
-                    # Log warning if there is no vif_port_id and an instance
-                    # is associated with the node.
-                    elif node.instance_uuid:
-                        LOG.warning(_LW(
-                            "No VIF found for instance %(instance)s "
-                            "port %(port)s when attempting to update port "
-                            "client-id."),
-                            {'port': port_uuid,
-                             'instance': node.instance_uuid})
-
-            if portgroup_obj and ((set(port_obj.obj_what_changed()) &
-                                  {'pxe_enabled', 'portgroup_id'}) or vif):
-                if ((port_obj.pxe_enabled or vif) and not
-                    portgroup_obj.standalone_ports_supported):
-                    msg = (_("Port group %(portgroup)s doesn't support "
-                             "standalone ports. This port %(port)s cannot be "
-                             " a member of that port group because either "
-                             "'extra/vif_port_id' was specified or "
-                             "'pxe_enabled' was set to True.") %
-                           {"portgroup": portgroup_obj.uuid,
-                            "port": port_uuid})
-                    raise exception.Conflict(msg)
+            task.driver.network.validate(task)
+            task.driver.network.port_changed(task, port_obj)
 
             port_obj.save()
 
@@ -2359,6 +2306,66 @@ class ConductorManager(base_manager.BaseConductorManager):
                                   purpose='heartbeat') as task:
             task.spawn_after(self._spawn_worker, task.driver.deploy.heartbeat,
                              task, callback_url)
+
+    @METRICS.timer('ConductorManager.vif_list')
+    @messaging.expected_exceptions(exception.NodeLocked,
+                                   exception.NetworkError,
+                                   exception.InvalidParameterValue)
+    def vif_list(self, context, node_id):
+        """List attached VIFs for a node
+
+        :param context: request context.
+        :param node_id: node id or uuid.
+        :raises NodeLocked, if node has an exclusive locked held on it
+        :raises Networkerror, if something goes wrong during list the vifs
+        :raises InvalidParameterValue, if a parameter is wrong/missing thats
+            required for vif list
+        """
+        with task_manager.acquire(context, node_id,
+                                  purpose='list vifs',
+                                  shared=True) as task:
+            task.driver.network.validate(task)
+            return task.driver.network.vif_list(task)
+
+    @METRICS.timer('ConductorManager.vif_attach')
+    @messaging.expected_exceptions(exception.NodeLocked,
+                                   exception.NetworkError,
+                                   exception.InvalidParameterValue)
+    def vif_attach(self, context, node_id, vif_obj):
+        """Attach a VIF to a node
+
+        :param context: request context.
+        :param node_id: node id or uuid.
+        :param vif_obj: An object representing a VIF.
+        :raises NodeLocked, if node has an exclusive locked held on it
+        :raises Networkerror, if something goes wrong during attaching the vif
+        :raises InvalidParameterValue, if a parameter is wrong/missing thats
+            required for vif attach
+        """
+        with task_manager.acquire(context, node_id,
+                                  purpose='attach vif') as task:
+            task.driver.network.validate(task)
+            return task.driver.network.vif_attach(task, vif_obj)
+
+    @METRICS.timer('ConductorManager.vif_detach')
+    @messaging.expected_exceptions(exception.NodeLocked,
+                                   exception.NetworkError,
+                                   exception.InvalidParameterValue)
+    def vif_detach(self, context, node_id, vif_id):
+        """Detach a VIF from a node
+
+        :param context: request context.
+        :param node_id: node id or uuid.
+        :param vif_id: A VIF ID.
+        :raises NodeLocked, if node has an exclusive locked held on it
+        :raises Networkerror, if something goes wrong during detaching the vif
+        :raises InvalidParameterValue, if a parameter is wrong/missing thats
+            required for vif detach
+        """
+        with task_manager.acquire(context, node_id,
+                                  purpose='detach vif') as task:
+            task.driver.network.validate(task)
+            return task.driver.network.vif_detach(task, vif_id)
 
     def _object_dispatch(self, target, method, context, args, kwargs):
         """Dispatch a call to an object method.
