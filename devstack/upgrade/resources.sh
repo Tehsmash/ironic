@@ -22,8 +22,7 @@ source $GRENADE_DIR/functions
 
 source $TOP_DIR/openrc admin admin
 
-IRONIC_DEVSTACK_DIR=$(cd $(dirname "$0")/.. && pwd)
-source $IRONIC_DEVSTACK_DIR/lib/ironic
+source $TOP_DIR/../ironic/devstack/lib/ironic
 
 RESOURCES_NETWORK_GATEWAY=${RESOURCES_NETWORK_GATEWAY:-10.2.0.1}
 RESOURCES_FIXED_RANGE=${RESOURCES_FIXED_RANGE:-10.2.0.0/20}
