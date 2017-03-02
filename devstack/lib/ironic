@@ -2006,6 +2006,21 @@ function cleanup_baremetal_basic_ops {
         done
     done
 
+    # Clean up VXLAN network if we're running in a multinode environment
+    sudo ovs-vsctl del-port ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
+    sudo ovs-vsctl del-port vxlan_${IRONIC_VM_NETWORK_BRIDGE}
+    sudo ip link del dev ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
+
+    if [[ "$HOST_TOPOLOGY_ROLE" == "primary" ]]; then
+        local id
+        for node in $HOST_TOPOLOGY_SUBNODES; do
+            id=$(echo $node | cut -d '.' -f 4)
+            sudo ip link del dev bmswdown$id
+        done
+    elif [[ "$HOST_TOPOLOGY_ROLE" == "subnode" ]]; then
+        sudo ip link del dev bmswitchup
+    fi
+
     sudo ovs-vsctl --if-exists del-br $IRONIC_VM_NETWORK_BRIDGE
 
     sudo rm -rf /etc/xinetd.d/tftp /etc/init/tftpd-hpa.override
@@ -2100,12 +2115,35 @@ function get_ironic_node_prefix {
 }
 
 function setup_vxlan_network {
-    sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE phy-brbm-vxlan
-    sudo ovs-vsctl add-port br_ironic_vxlan phy-vxlan-brbm
-    sudo ovs-vsctl set interface phy-brbm-vxlan type=patch
-    sudo ovs-vsctl set interface phy-vxlan-brbm type=patch
-    sudo ovs-vsctl set interface phy-vxlan-brbm options:peer=phy-brbm-vxlan
-    sudo ovs-vsctl set interface phy-brbm-vxlan options:peer=phy-vxlan-brbm
+    local old_vxlan_bridge
+    old_vxlan_bridge=$(sudo ovs-vsctl show | grep br_ironic_vxlan)
+
+    if [[ -n "${old_vxlan_bridge}" ]]; then
+        # If vxlan bridge already exists just plumb that and return
+        sudo ip link add dev ${IRONIC_VM_NETWORK_BRIDGE}_vxlan type veth peer name vxlan_${IRONIC_VM_NETWORK_BRIDGE}
+        sudo ip link set ${IRONIC_VM_NETWORK_BRIDGE}_vxlan up
+        sudo ip link set vxlan_${IRONIC_VM_NETWORK_BRIDGE} up
+        sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE ${IRONIC_VM_NETWORK_BRIDGE}_vxlan
+        sudo ovs-vsctl add-port br_ironic_vxlan vxlan_${IRONIC_VM_NETWORK_BRIDGE}
+        return
+    fi
+
+    # Connect multinode bmswitchs together with a tunnel to simulate a single physical network
+    # We use a VXLAN tunnel because some CI node providers don't allow GRE
+    # Neutron defaults to vxlans 1-1000 in devstack so we use 20000 to avoid conflicts
+    if [[ "$HOST_TOPOLOGY_ROLE" == "primary" ]]; then
+        local id
+        for node in $HOST_TOPOLOGY_SUBNODES; do
+            id=$(echo $node | cut -d '.' -f 4)
+            sudo ip link add bmswdown$id type vxlan id 20000 remote $node local $HOST_IP dstport 4789
+            sudo ip link set bmswdown$id up
+            sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE bmswdown$id
+        done
+    elif [[ "$HOST_TOPOLOGY_ROLE" == "subnode" ]]; then
+        sudo ip link add bmswitchup type vxlan id 20000 remote $SERVICE_HOST local $HOST_IP dstport 4789
+        sudo ip link set bmswitchup up
+        sudo ovs-vsctl add-port $IRONIC_VM_NETWORK_BRIDGE bmswitchup
+    fi
 }
 
 # Restore xtrace + pipefail
