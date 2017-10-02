@@ -12,7 +12,7 @@ export PS4='+ ${BASH_SOURCE:-}:${FUNCNAME[0]:-}:L${LINENO:-}:   '
 # Keep track of the DevStack directory
 TOP_DIR=$(cd $(dirname "$0")/.. && pwd)
 
-while getopts "n:c:i:m:M:d:a:b:e:E:p:o:f:l:L:N:" arg; do
+while getopts "n:c:i:m:M:d:a:b:e:E:p:o:f:l:L:N:O:" arg; do
     case $arg in
         n) NAME=$OPTARG;;
         c) CPU=$OPTARG;;
@@ -32,6 +32,7 @@ while getopts "n:c:i:m:M:d:a:b:e:E:p:o:f:l:L:N:" arg; do
         l) LOGDIR=$OPTARG;;
         L) UEFI_LOADER=$OPTARG;;
         N) UEFI_NVRAM=$OPTARG;;
+        O) OOB_MANAGEMENT=$OPTARG;;
     esac
 done
 
@@ -91,6 +92,7 @@ fi
 # This is needed in order to have interface in OVS even
 # when VM is in shutdown state
 INTERFACE_COUNT=${INTERFACE_COUNT:-1}
+ADDRESSES=""
 
 for int in $(seq 1 $INTERFACE_COUNT); do
     tapif=tap-${NAME}i${int}
@@ -98,6 +100,8 @@ for int in $(seq 1 $INTERFACE_COUNT); do
     sudo ip link set $tapif mtu $INTERFACE_MTU
     sudo ip link set $tapif up
     sudo ovs-vsctl add-port $BRIDGE $tapif
+    address=$(ip l sh $tapif | awk '/link\/ether/ { print $2 }')
+    ADDRESSES="${ADDRESSES} ${tapif},${address}"
 done
 
 if ! virsh list --all | grep -q $NAME; then
@@ -125,6 +129,71 @@ if ! virsh list --all | grep -q $NAME; then
     fi
 fi
 
-# echo mac in format mac1,ovs-node-0i1;mac2,ovs-node-0i2;...;macN,ovs-node0iN
-VM_MAC=$(echo -n $(virsh domiflist $NAME |awk '/tap-/{print $5","$1}')|tr ' ' ';')
-echo -n "$VM_MAC $VBMC_PORT $PDU_OUTLET"
+cat << EOF
+ -
+  name: ${NAME}
+  driver: pxe_ipmitool
+  driver_info:
+    deploy_kernel:
+    deploy_ramdisk:
+EOF
+
+if [[ "$OOB_MANAGEMENT" == "vbmc" ]]; then
+  vbmc_ip=127.0.0.1
+  cat << EOF
+    ipmi_address: ${vbmc_ip}
+    ipmi_username: admin
+    ipmi_password: password
+    ipmi_port: ${VBMC_PORT}
+EOF
+fi
+
+if [[ "$OOB_MANAGEMENT" == "vpdu" ]]; then
+  vpdu_ip=127.0.0.1
+  cat << EOF
+    snmp_address: ${vpdu_ip}
+    snmp_driver: apc_rackpdu
+    snmp_port: 1161
+    snmp_protocol: 2c
+    snmp_community: private
+    snmp_outlet: ${PDU_OUTLET}
+EOF
+fi
+
+if [[ "$OOB_MANAGEMENT" == "redfish" ]]; then
+  red_ip=127.0.0.1
+  cat << EOF
+    redfish_address: ${red_ip}
+    redfish_username: admin
+    redfish_password: password
+    redfish_system_id: /redfish/v1/Systems/${NAME}
+EOF
+fi
+
+cat << EOF
+  properties:
+    capabilities: 'boot_option:local'
+    cpus: ${CPU}
+    local_gb: ${DISK}
+    memory_mb: ${MEM}
+    cpu_arch: x86_64
+  ports:
+EOF
+
+switch_mac=$(ip l sh $BRIDGE | awk '/link\/ether/ { print $2 }')
+
+for address_name in $ADDRESSES; do
+  name=$(echo "$address_name" | cut -d "," -f 1)
+  address=$(echo "$address_name" | cut -d "," -f 2)
+
+  cat << EOF
+    -
+     address: ${address}
+     local_link_connection:
+       switch_info: ${BRIDGE}
+       port_id: ${name}
+       switch_id: ${switch_mac}
+     pxe_enabled: True
+EOF
+
+done

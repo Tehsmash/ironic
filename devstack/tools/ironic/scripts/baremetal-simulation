@@ -1,0 +1,238 @@
+#!/bin/bash
+
+set -ex
+
+WORKDIR=$(readlink -f $0 | xargs dirname)
+
+source ${WORKDIR}/baremetal-simulation-lib
+
+VSWITCH_NAME=bmswitch
+VM_SPECS_CPU=1
+VM_SPECS_RAM=1280
+VM_SPECS_DISK=10
+VM_SPECS_CPU_ARCH=x86_64
+VM_INTERFACE_COUNT=2
+VM_SPECS_DISK_FORMAT=qcow2
+VM_TAP_MTU=1400
+VM_EMULATOR=/usr/bin/qemu-system-x86_64
+VM_ENGINE=qemu
+NUM_OF_VMS=1
+LIBVIRT_HOOKS_PATH=/etc/libvirt/hooks/
+#VM_LOG_DIR=/var/log/baremetal-sim
+VM_LOG_DIR=$HOME/baremetal-sim
+
+VM_OOB_MANAGEMENT=vbmc
+
+VBMC_PORT_RANGE_START=${VBMC_PORT_RANGE_START:-6230}
+VBMC_CONFIG_FILE=${VBMC_CONFIG_FILE:-$HOME/.vbmc/virtualbmc.conf}
+VBMC_LOGFILE=${VBMC_LOGFILE:-$VM_LOG_DIR/virtualbmc.log}
+
+VPDU_CONFIG_FILE=${VPDU_CONFIG_FILE:-$HOME/.vpdu/virtualpdu.conf}
+VPDU_PORT_RANGE_START=${VPDU_PORT_RANGE_START:-1}
+VPDU_LISTEN_PORT=${VPDU_LISTEN_PORT:-1161}
+VPDU_COMMUNITY=${VPDU_COMMUNITY:-private}
+VPDU_SNMPDRIVER=${VPDU_SNMPDRIVER:-apc_rackpdu}
+
+REDFISH_EMULATOR_PORT=${REDFISH_EMULATOR_PORT:-9132}
+REDFISH_EMULATOR_PID_FILE=${REDFISH_EMULATOR_PID_FILE:-/var/run/redfish-emulator.pid}
+
+# By default, baremetal VMs will console output to file.
+VM_LOG_CONSOLE=$(trueorfalse True VM_LOG_CONSOLE)
+VM_LOG_DIR=${VM_LOG_DIR:-$DATA_DIR/logs/}
+VM_LOG_ROTATE=$(trueorfalse True VM_LOG_ROTATE)
+
+# If VM_ENGING is explicitly set to "auto" or "kvm",
+# devstack will attempt to use hardware virtualization
+# (aka nested kvm). We do not enable it in the infra gates
+# because it is not consistently supported/working across
+# all gate infrastructure providers.
+if [[ "$VM_ENGINE" == "auto" ]]; then
+    sudo modprobe kvm || true
+    if [ ! -e /dev/kvm ]; then
+        echo "WARNING: Switching to QEMU"
+        VM_ENGINE=qemu
+        if [[ -z "$VM_EMULATOR" ]]; then
+            VM_EMULATOR='/usr/bin/qemu-system-x86_64'
+        fi
+    else
+        VM_ENGINE=kvm
+    fi
+fi
+
+if [[ "$VM_ENGINE" == "kvm" ]]; then
+    # Set this to empty, so configure-vm.py can autodetect location
+    # of KVM binary
+    VM_EMULATOR=""
+fi
+
+function restart_libvirt {
+    local libvirt_service_name="libvirtd"
+    if is_ubuntu && [ ! -f /etc/init.d/libvirtd ]; then
+        libvirt_service_name="libvirt-bin"
+    fi
+    restart_service $libvirt_service_name
+}
+
+function setup_virtualbmc {
+    if [[ ! -d $(dirname $VBMC_CONFIG_FILE) ]]; then 
+        mkdir -p $(dirname $VBMC_CONFIG_FILE)
+    fi   
+
+    iniset $VBMC_CONFIG_FILE log debug True 
+    iniset $VBMC_CONFIG_FILE log logfile $VBMC_LOGFILE
+}
+
+function setup_virtualpdu {
+    if use_library_from_git "virtualpdu"; then 
+        git_clone_by_name "virtualpdu"
+        setup_dev_lib "virtualpdu"
+    else 
+        pip_install "virtualpdu"
+    fi   
+
+    mkdir -p $(dirname $VPDU_CONFIG_FILE)
+
+    iniset $VPDU_CONFIG_FILE global debug True 
+    iniset $VPDU_CONFIG_FILE global libvirt_uri "qemu:///system"
+    iniset $VPDU_CONFIG_FILE PDU listen_address ${HOST_IP}
+    iniset $VPDU_CONFIG_FILE PDU listen_port ${VPDU_LISTEN_PORT}
+    iniset $VPDU_CONFIG_FILE PDU community ${VPDU_COMMUNITY}
+    iniset $VPDU_CONFIG_FILE PDU ports $(_generate_pdu_ports)
+    iniset $VPDU_CONFIG_FILE PDU outlet_default_state "OFF"
+
+    enable_service ir-vpdu
+}
+
+# Starts VirtualPDU
+function start_virtualpdu {
+    run_process ir-vpdu "$(which virtualpdu) $VPDU_CONFIG_FILE" libvirt
+}
+
+function start_redfish_emulator {
+    # TODO(lucasagomes): Use Apache WSGI instead of gunicorn
+    if is_ubuntu; then 
+        install_package gunicorn
+    else 
+        pip_install_gr "gunicorn"
+    fi
+
+    sudo gunicorn sushy_tools.emulator.main:app --bind "${HOST_IP}:${REDFISH_EMULATOR_PORT}" \
+        --pid "$REDFISH_EMULATOR_PID_FILE" --daemon
+}
+
+function setup_redfish {
+    if use_library_from_git "sushy"; then
+        git_clone_by_name "sushy"
+        setup_dev_lib "sushy"
+    else
+        pip_install_gr "sushy"
+    fi
+
+    pip_install "sushy-tools"
+    start_redfish_emulator
+}
+ 
+function setup_qemu_log_hook {
+    # Make sure the libvirt hooks directory exist
+    sudo mkdir -p $LIBVIRT_HOOKS_PATH
+
+    # Copy the qemu hook to the right directory
+    sudo cp ${WORKDIR}/hooks/qemu.py $LIBVIRT_HOOKS_PATH/qemu
+    sudo chmod -v +x $LIBVIRT_HOOKS_PATH/qemu
+    sudo sed -e " 
+        s|%LOG_DIR%|$VM_LOG_DIR|g;
+    " -i $LIBVIRT_HOOKS_PATH/qemu
+
+    restart_libvirt
+    mkdir -p $VM_LOG_DIR
+    cat >${VM_LOG_DIR}/README << EOF
+This directory contains the serial console log files from the virtual Ironic
+bare-metal nodes. The *_console_* log files are the original log files and
+include ANSI control codes which can make the output difficult to read. The
+*_no_ansi_* log files have had ANSI control codes removed from the file and are
+easier to read.
+
+On some occasions there won't be a corresponding *_no_ansi_* log file, for
+example if the job failed due to a time-out. You may see a log file without a
+date/time in the file name. In that case you can display the logfile in your
+console by doing:
+   $ curl URL_TO_LOGFILE
+
+This will have your terminal process the ANSI escape codes.
+
+Another option, if you have the 'pv' executable installed, is to simulate a
+low-speed connection.  In this example simulate a 300 Bytes/second connection.
+   $ curl URL_TO_LOGFILE | pv -q -L 300
+
+This can allow you to see some of the content before the screen is cleared by
+an ANSI escape sequence.
+
+EOF
+}
+
+function create_vm {
+  local vm_name=$1
+  local vbmc_port=$((30000 + RANDOM % 1000))
+  local pdu_outlet=$((RANDOM % 1000))
+
+  ${WORKDIR}/create-node.sh -n $vm_name -c $VM_SPECS_CPU -m $VM_SPECS_RAM -d $VM_SPECS_DISK \
+    -a $VM_SPECS_CPU_ARCH -b $VSWITCH_NAME -e $VM_EMULATOR -E $VM_ENGINE -p $vbmc_port \
+    -o $pdu_outlet -i $VM_INTERFACE_COUNT -f $VM_SPECS_DISK_FORMAT -M $VM_TAP_MTU -O $VM_OOB_MANAGEMENT > tmp-${vm_name}
+
+  cat tmp-${vm_name}
+  rm -f tmp-${vm_name}
+}
+
+function start_simulation {
+  setup_qemu_log_hook
+  setup_virtualbmc
+
+  sudo ovs-vsctl --may-exist add-br $VSWITCH_NAME
+
+  local nodes="nodes:"
+
+  for i in $(seq 1 $NUM_OF_VMS); do
+    node="$(create_vm simbm-${i})"
+    nodes="$nodes"$'\n'"$node"
+  done
+
+  sudo ip link add dev bmveth1 type veth peer name bmveth2
+  sudo ovs-vsctl add-port $VSWITCH_NAME bmveth1
+  sudo ip link set dev bmveth1 up
+  sudo ip link set dev bmveth2 up
+
+  echo "$nodes" > simulated_baremetal_nodes.yaml
+}
+
+function stop_simulation {
+  sudo ip link del dev bmveth1
+  
+  for i in $(seq 1 $NUM_OF_VMS); do
+    ${WORKDIR}/cleanup-node.sh simbm-${i} $VM_INTERFACE_COUNT || true
+  done
+
+  sudo ovs-vsctl --if-exists del-br $VSWITCH_NAME
+
+  rm -f simulated_baremetal_nodes
+}
+
+START=false
+STOP=false
+
+while [ "$1" != "" ]; do
+    case $1 in
+        --start )               START=true
+                                ;;
+        --stop )                STOP=true
+                                ;;
+        * )                     usage
+                                exit 1
+    esac
+    shift || true
+done
+
+if $START; then
+  start_simulation
+elif $STOP; then
+  stop_simulation
+fi

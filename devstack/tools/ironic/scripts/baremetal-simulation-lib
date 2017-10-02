@@ -1,0 +1,162 @@
+#!/bin/bash 
+
+# trueorfalse <True|False> <VAR>
+#
+# Normalize config-value provided in variable VAR to either "True" or
+# "False".  If VAR is unset (i.e. $VAR evaluates as empty), the value
+# of the second argument will be used as the default value.
+#
+#  Accepts as False: 0 no  No  NO  false False FALSE
+#  Accepts as True:  1 yes Yes YES true  True  TRUE
+#
+# usage:
+#  VAL=$(trueorfalse False VAL)
+function trueorfalse {
+    local xtrace
+    xtrace=$(set +o | grep xtrace)
+    set +o xtrace
+
+    local default=$1
+
+    if [ -z $2 ]; then 
+        die $LINENO "variable to normalize required"
+    fi   
+    local testval=${!2:-}
+
+    case "$testval" in
+        "1" | [yY]es | "YES" | [tT]rue | "TRUE" ) echo "True" ;;
+        "0" | [nN]o | "NO" | [fF]alse | "FALSE" ) echo "False" ;;
+        * )                                       echo "$default" ;;
+    esac 
+
+    $xtrace
+}
+
+declare -g os_VENDOR os_RELEASE os_PACKAGE os_CODENAME
+
+# Make a *best effort* attempt to install lsb_release packages for the
+# user if not available.  Note can't use generic install_package*
+# because they depend on this!
+function _ensure_lsb_release {
+    if [[ -x $(command -v lsb_release 2>/dev/null) ]]; then
+        return
+    fi
+
+    if [[ -x $(command -v apt-get 2>/dev/null) ]]; then
+        sudo apt-get install -y lsb-release
+    elif [[ -x $(command -v zypper 2>/dev/null) ]]; then
+        # XXX: old code paths seem to have assumed SUSE platforms also
+        # had "yum".  Keep this ordered above yum so we don't try to
+        # install the rh package.  suse calls it just "lsb"
+        sudo zypper -n install lsb
+    elif [[ -x $(command -v dnf 2>/dev/null) ]]; then
+        sudo dnf install -y redhat-lsb-core
+    elif [[ -x $(command -v yum 2>/dev/null) ]]; then
+        # all rh patforms (fedora, centos, rhel) have this pkg
+        sudo yum install -y redhat-lsb-core
+    else
+        die $LINENO "Unable to find or auto-install lsb_release"
+    fi
+}
+
+# GetOSVersion
+#  Set the following variables:
+#  - os_RELEASE
+#  - os_CODENAME
+#  - os_VENDOR
+#  - os_PACKAGE
+function GetOSVersion {
+    # We only support distros that provide a sane lsb_release
+    _ensure_lsb_release
+
+    os_RELEASE=$(lsb_release -r -s)
+    os_CODENAME=$(lsb_release -c -s)
+    os_VENDOR=$(lsb_release -i -s)
+
+    if [[ $os_VENDOR =~ (Debian|Ubuntu|LinuxMint) ]]; then
+        os_PACKAGE="deb"
+    else
+        os_PACKAGE="rpm"
+    fi
+
+    typeset -xr os_VENDOR
+    typeset -xr os_RELEASE
+    typeset -xr os_PACKAGE
+    typeset -xr os_CODENAME
+}
+
+# Determine if current distribution is an Ubuntu-based distribution
+# It will also detect non-Ubuntu but Debian-based distros
+# is_ubuntu
+function is_ubuntu {
+    if [[ -z "$os_PACKAGE" ]]; then 
+        GetOSVersion
+    fi   
+    [ "$os_PACKAGE" = "deb" ]
+}
+
+# Service wrapper to restart services
+# restart_service service-name
+function restart_service {
+    if [ -x /bin/systemctl ]; then
+        sudo /bin/systemctl restart $1
+    else
+        sudo service $1 restart
+    fi
+}
+
+# Determinate is the given option present in the INI file
+# ini_has_option config-file section option
+function ini_has_option {
+    local xtrace
+    xtrace=$(set +o | grep xtrace)
+    set +o xtrace
+    local file=$1
+    local section=$2
+    local option=$3
+    local line
+
+    line=$(sed -ne "/^\[$section\]/,/^\[.*\]/ { /^$option[ \t]*=/ p; }" "$file")
+    $xtrace
+    [ -n "$line" ]
+}
+
+# Set an option in an INI file
+# iniset [-sudo] config-file section option value
+#  - if the file does not exist, it is created
+function iniset {
+    local xtrace
+    xtrace=$(set +o | grep xtrace)
+    set +o xtrace
+    local sudo=""
+    if [ $1 == "-sudo" ]; then
+        sudo="sudo "
+        shift
+    fi
+    local file=$1
+    local section=$2
+    local option=$3
+    local value=$4
+
+    if [[ -z $section || -z $option ]]; then
+        $xtrace
+        return
+    fi
+
+    if ! grep -q "^\[$section\]" "$file" 2>/dev/null; then
+        # Add section at the end
+        echo -e "\n[$section]" | $sudo tee --append "$file" > /dev/null
+    fi
+    if ! ini_has_option "$file" "$section" "$option"; then
+        # Add it
+        $sudo sed -i -e "/^\[$section\]/ a\\
+$option = $value
+" "$file"
+    else
+        local sep
+        sep=$(echo -ne "\x01")
+        # Replace it
+        $sudo sed -i -e '/^\['${section}'\]/,/^\[.*\]/ s'${sep}'^\('${option}'[ \t]*=[ \t]*\).*$'${sep}'\1'"${value}"${sep} "$file"
+    fi
+    $xtrace
+}

@@ -27,6 +27,11 @@ if is_service_enabled ir-api ir-cond; then
             install_ironicclient
             cleanup_ironic_config_files
 
+            if [[ "$IRONIC_BAREMETAL_BASIC_OPS" == "True" && "$IRONIC_IS_HARDWARE" == "False" ]]; then
+                echo_summary "Creating baremetal simulation"
+                ${IRONIC_SCRIPTS_DIR}/baremetal-simulation --start
+                export IRONIC_YAML_NODES=simulated_baremetal_nodes.yaml
+            fi
         elif [[ "$2" == "post-config" ]]; then
         # stack/post-config - Called after the layer 1 and 2 services have been
         # configured. All configuration files for enabled services should exist
@@ -45,11 +50,6 @@ if is_service_enabled ir-api ir-cond; then
 
             # Initialize ironic
             init_ironic
-
-            if [[ "$IRONIC_BAREMETAL_BASIC_OPS" == "True" && "$IRONIC_IS_HARDWARE" == "False" ]]; then
-                echo_summary "Creating bridge and VMs"
-                create_bridge_and_vms
-            fi
 
             if is_service_enabled neutron || [[ "$HOST_TOPOLOGY" == "multinode" ]]; then
                 echo_summary "Configuring Ironic networks"
@@ -80,6 +80,11 @@ if is_service_enabled ir-api ir-cond; then
         stop_ironic
         cleanup_ironic_provision_network
         cleanup_baremetal_basic_ops
+        
+        if [[ "$IRONIC_BAREMETAL_BASIC_OPS" == "True" && "$IRONIC_IS_HARDWARE" == "False" ]]; then
+            echo_summary "Creating baremetal simulation"
+            ${IRONIC_SCRIPTS_DIR}/baremetal-simulation --stop
+        fi
     fi
 
     if [[ "$1" == "clean" ]]; then

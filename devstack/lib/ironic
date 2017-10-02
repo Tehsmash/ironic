@@ -115,18 +115,6 @@ IRONIC_TEMPLATES_DIR=${IRONIC_TEMPLATES_DIR:-$IRONIC_DEVSTACK_DIR/tools/ironic/t
 IRONIC_BAREMETAL_BASIC_OPS=$(trueorfalse False IRONIC_BAREMETAL_BASIC_OPS)
 IRONIC_TFTPBOOT_DIR=${IRONIC_TFTPBOOT_DIR:-$IRONIC_DATA_DIR/tftpboot}
 IRONIC_TFTPSERVER_IP=${IRONIC_TFTPSERVER_IP:-$HOST_IP}
-IRONIC_VM_COUNT=${IRONIC_VM_COUNT:-1}
-IRONIC_VM_SPECS_CPU=${IRONIC_VM_SPECS_CPU:-1}
-IRONIC_VM_SPECS_RAM=${IRONIC_VM_SPECS_RAM:-1280}
-IRONIC_VM_SPECS_CPU_ARCH=${IRONIC_VM_SPECS_CPU_ARCH:-'x86_64'}
-IRONIC_VM_SPECS_DISK=${IRONIC_VM_SPECS_DISK:-10}
-IRONIC_VM_SPECS_DISK_FORMAT=${IRONIC_VM_SPECS_DISK_FORMAT:-qcow2}
-IRONIC_VM_EPHEMERAL_DISK=${IRONIC_VM_EPHEMERAL_DISK:-0}
-IRONIC_VM_EMULATOR=${IRONIC_VM_EMULATOR:-'/usr/bin/qemu-system-x86_64'}
-IRONIC_VM_ENGINE=${IRONIC_VM_ENGINE:-qemu}
-IRONIC_VM_NETWORK_BRIDGE=${IRONIC_VM_NETWORK_BRIDGE:-brbm}
-IRONIC_VM_INTERFACE_COUNT=${IRONIC_VM_INTERFACE_COUNT:-2}
-IRONIC_VM_MACS_CSV_FILE=${IRONIC_VM_MACS_CSV_FILE:-$IRONIC_DATA_DIR/ironic_macs.csv}
 IRONIC_CLEAN_NET_NAME=${IRONIC_CLEAN_NET_NAME:-${IRONIC_PROVISION_NETWORK_NAME:-${PRIVATE_NETWORK_NAME}}}
 IRONIC_EXTRA_PXE_PARAMS=${IRONIC_EXTRA_PXE_PARAMS:-}
 IRONIC_TTY_DEV=${IRONIC_TTY_DEV:-ttyS0}
@@ -154,34 +142,7 @@ IRONIC_ENABLED_RAID_INTERFACES=${IRONIC_ENABLED_RAID_INTERFACES:-"agent,no-raid"
 IRONIC_ENABLED_VENDOR_INTERFACES=${IRONIC_ENABLED_VENDOR_INTERFACES:-"ipmitool,no-vendor"}
 IRONIC_ENABLED_STORAGE_INTERFACES=${IRONIC_ENABLED_STORAGE_INTERFACES:-"cinder,noop"}
 IRONIC_ENABLED_NETWORK_INTERFACES=${IRONIC_ENABLED_NETWORK_INTERFACES:-"flat,noop"}
-# If IRONIC_VM_ENGING is explicitly set to "auto" or "kvm",
-# devstack will attempt to use hardware virtualization
-# (aka nested kvm). We do not enable it in the infra gates
-# because it is not consistently supported/working across
-# all gate infrastructure providers.
-if [[ "$IRONIC_VM_ENGINE" == "auto" ]]; then
-    sudo modprobe kvm || true
-    if [ ! -e /dev/kvm ]; then
-        echo "WARNING: Switching to QEMU"
-        IRONIC_VM_ENGINE=qemu
-        if [[ -z "$IRONIC_VM_EMULATOR" ]]; then
-            IRONIC_VM_EMULATOR='/usr/bin/qemu-system-x86_64'
-        fi
-    else
-        IRONIC_VM_ENGINE=kvm
-    fi
-fi
 
-if [[ "$IRONIC_VM_ENGINE" == "kvm" ]]; then
-    # Set this to empty, so configure-vm.py can autodetect location
-    # of KVM binary
-    IRONIC_VM_EMULATOR=""
-fi
-
-# By default, baremetal VMs will console output to file.
-IRONIC_VM_LOG_CONSOLE=$(trueorfalse True IRONIC_VM_LOG_CONSOLE)
-IRONIC_VM_LOG_DIR=${IRONIC_VM_LOG_DIR:-$IRONIC_DATA_DIR/logs/}
-IRONIC_VM_LOG_ROTATE=$(trueorfalse True IRONIC_VM_LOG_ROTATE)
 
 # Set resource_classes for nodes to use Nova's placement engine
 IRONIC_USE_RESOURCE_CLASSES=$(trueorfalse True IRONIC_USE_RESOURCE_CLASSES)
@@ -290,32 +251,10 @@ IRONIC_HTTP_PORT=${IRONIC_HTTP_PORT:-3928}
 # Whether DevStack will be setup for bare metal or VMs
 IRONIC_IS_HARDWARE=$(trueorfalse False IRONIC_IS_HARDWARE)
 
-# The first port in the range to bind the Virtual BMCs. The number of
-# ports that will be used depends on $IRONIC_VM_COUNT variable, e.g if
-# $IRONIC_VM_COUNT=3 the ports 6230, 6231 and 6232 will be used for the
-# Virtual BMCs, one for each VM.
-IRONIC_VBMC_PORT_RANGE_START=${IRONIC_VBMC_PORT_RANGE_START:-6230}
-IRONIC_VBMC_CONFIG_FILE=${IRONIC_VBMC_CONFIG_FILE:-$HOME/.vbmc/virtualbmc.conf}
-IRONIC_VBMC_LOGFILE=${IRONIC_VBMC_LOGFILE:-$IRONIC_VM_LOG_DIR/virtualbmc.log}
-
-# Virtual PDU configs
-IRONIC_VPDU_CONFIG_FILE=${IRONIC_VPDU_CONFIG_FILE:-$HOME/.vpdu/virtualpdu.conf}
-IRONIC_VPDU_PORT_RANGE_START=${IRONIC_VPDU_PORT_RANGE_START:-1}
-IRONIC_VPDU_LISTEN_PORT=${IRONIC_VPDU_LISTEN_PORT:-1161}
-IRONIC_VPDU_COMMUNITY=${IRONIC_VPDU_COMMUNITY:-private}
-IRONIC_VPDU_SNMPDRIVER=${IRONIC_VPDU_SNMPDRIVER:-apc_rackpdu}
-
-# Redfish configs
-IRONIC_REDFISH_EMULATOR_PORT=${IRONIC_REDFISH_EMULATOR_PORT:-9132}
-IRONIC_REDFISH_EMULATOR_PID_FILE=${IRONIC_REDFISH_EMULATOR_PID_FILE:-/var/run/redfish-emulator.pid}
-
 # To explicitly enable configuration of Glance with Swift
 # (which is required by some vendor drivers), set this
 # variable to true.
 IRONIC_CONFIGURE_GLANCE_WITH_SWIFT=$(trueorfalse False IRONIC_CONFIGURE_GLANCE_WITH_SWIFT)
-
-# The path to the libvirt hooks directory, used if IRONIC_VM_LOG_ROTATE is True
-IRONIC_LIBVIRT_HOOKS_PATH=${IRONIC_LIBVIRT_HOOKS_PATH:-/etc/libvirt/hooks/}
 
 # The authentication strategy used by ironic-api. Valid values are:
 # keystone and noauth.
@@ -621,13 +560,6 @@ function setup_virtualbmc {
         # environment else IPMI calls will fail at the gate.
         USE_PYTHON3=False pip_install_gr "virtualbmc"
     fi
-
-    if [[ ! -d $(dirname $IRONIC_VBMC_CONFIG_FILE) ]]; then
-        mkdir -p $(dirname $IRONIC_VBMC_CONFIG_FILE)
-    fi
-
-    iniset $IRONIC_VBMC_CONFIG_FILE log debug True
-    iniset $IRONIC_VBMC_CONFIG_FILE log logfile $IRONIC_VBMC_LOGFILE
 }
 
 
@@ -1275,16 +1207,6 @@ function init_ironic {
     create_ironic_cache_dir
 }
 
-# _ironic_bm_vm_names() - Generates list of names for baremetal VMs.
-function _ironic_bm_vm_names {
-    local idx
-    local num_vms
-    num_vms=$(($IRONIC_VM_COUNT - 1))
-    for idx in $(seq 0 $num_vms); do
-        echo "$(get_ironic_node_prefix)-${idx}"
-    done
-}
-
 # start_ironic() - Start running processes, including screen
 function start_ironic {
     # Start Ironic API server, if enabled.
@@ -1341,11 +1263,6 @@ function start_ironic_conductor {
     # TODO(romcheg): Find a way to check whether the conductor has started.
 }
 
-# Starts VirtualPDU
-function start_virtualpdu {
-    run_process ir-vpdu "$(which virtualpdu) $IRONIC_VPDU_CONFIG_FILE" libvirt
-}
-
 
 # stop_ironic() - Stop running processes
 function stop_ironic {
@@ -1355,158 +1272,6 @@ function stop_ironic {
         stop_process ir-api
     fi
     stop_process ir-cond
-}
-
-# create_ovs_taps is also called by the devstack/upgrade/resources.sh script
-#
-# create_ovs_taps ironic_network_id
-# NOTE(vsaienko) Ironic supports only Flat Neutron network.
-# create_ovs_taps are needed in order to provide connectivity from ironic-conductor
-# to VM. With Neutron Flat network it will be not needed.
-function create_ovs_taps {
-    local ironic_net_id
-    ironic_net_id=$1
-    die_if_not_set $LINENO ironic_net_id "Failed to get ironic network id"
-
-    # Work around: No netns exists on host until a Neutron port is created.  We
-    # need to create one in Neutron to know what netns to tap into prior to the
-    # first node booting.
-    local port_id
-    port_id=$(neutron port-create ${ironic_net_id} | grep " id " | get_field 2)
-    # NOTE(vsaienko) openstack port create was introduced in Newton.
-    # Since the function is used during upgrade, it should be backward compatible with Mitaka.
-    # Switch to openstack port create in Ocata release.
-    #port_id=$(openstack port create --network ${ironic_net_id} temp_port -c id -f value)
-    die_if_not_set $LINENO port_id "Failed to create neutron port"
-
-    # intentional sleep to make sure the tag has been set to port
-    sleep 10
-
-    local tapdev
-    tapdev=$(sudo ip netns exec qdhcp-${ironic_net_id} ip link list | grep " tap" | cut -d':' -f2 | cut -d'@' -f1 | cut -b2-)
-    die_if_not_set $LINENO tapdev "Failed to get tap device id"
-    local tag_id
-    tag_id=$(sudo ovs-vsctl get port ${tapdev} tag)
-    die_if_not_set $LINENO tag_id "Failed to get tag id"
-
-    local ovs_tap=ovs-tap
-    local brbm_tap=brbm-tap
-    # make sure veth pair is not existing, otherwise delete its links
-    sudo ip link show $ovs_tap && sudo ip link delete $ovs_tap
-    sudo ip link show $brbm_tap && sudo ip link delete $brbm_tap
-    # create veth pair for future interconnection between br-int and brbm
-    sudo ip link add $brbm_tap type veth peer name $ovs_tap
-    sudo ip link set dev $brbm_tap up
-    sudo ip link set dev $ovs_tap up
-
-    sudo ovs-vsctl -- --if-exists del-port $ovs_tap -- add-port br-int $ovs_tap tag=$tag_id
-    sudo ovs-vsctl -- --if-exists del-port $brbm_tap -- add-port $IRONIC_VM_NETWORK_BRIDGE $brbm_tap
-
-    # Remove the port needed only for workaround.
-    openstack port delete $port_id
-
-    # Finally, share the fixed tenant network across all tenants.  This allows the host
-    # to serve TFTP to a single network namespace via the tap device created above.
-    openstack network set $ironic_net_id --share
-}
-
-function setup_qemu_log_hook {
-    # Make sure the libvirt hooks directory exist
-    sudo mkdir -p $IRONIC_LIBVIRT_HOOKS_PATH
-
-    # Copy the qemu hook to the right directory
-    sudo cp $IRONIC_DEVSTACK_FILES_DIR/hooks/qemu.py $IRONIC_LIBVIRT_HOOKS_PATH/qemu
-    sudo chmod -v +x $IRONIC_LIBVIRT_HOOKS_PATH/qemu
-    sudo sed -e "
-        s|%LOG_DIR%|$IRONIC_VM_LOG_DIR|g;
-    " -i $IRONIC_LIBVIRT_HOOKS_PATH/qemu
-
-    restart_libvirt
-    mkdir -p $IRONIC_VM_LOG_DIR
-    cat >${IRONIC_VM_LOG_DIR}/README << EOF
-This directory contains the serial console log files from the virtual Ironic
-bare-metal nodes. The *_console_* log files are the original log files and
-include ANSI control codes which can make the output difficult to read. The
-*_no_ansi_* log files have had ANSI control codes removed from the file and are
-easier to read.
-
-On some occasions there won't be a corresponding *_no_ansi_* log file, for
-example if the job failed due to a time-out. You may see a log file without a
-date/time in the file name. In that case you can display the logfile in your
-console by doing:
-   $ curl URL_TO_LOGFILE
-
-This will have your terminal process the ANSI escape codes.
-
-Another option, if you have the 'pv' executable installed, is to simulate a
-low-speed connection.  In this example simulate a 300 Bytes/second connection.
-   $ curl URL_TO_LOGFILE | pv -q -L 300
-
-This can allow you to see some of the content before the screen is cleared by
-an ANSI escape sequence.
-
-EOF
-}
-
-function create_bridge_and_vms {
-    # Call libvirt setup scripts in a new shell to ensure any new group membership
-    sudo su $STACK_USER -c "$IRONIC_SCRIPTS_DIR/setup-network.sh $IRONIC_VM_NETWORK_BRIDGE $PUBLIC_BRIDGE_MTU"
-    if [[ "$IRONIC_VM_LOG_CONSOLE" == "True" ]] ; then
-        local log_arg="-l $IRONIC_VM_LOG_DIR"
-
-        if [[ "$IRONIC_VM_LOG_ROTATE" == "True" ]] ; then
-            setup_qemu_log_hook
-        fi
-    else
-        local log_arg=""
-    fi
-
-    local vbmc_port=$IRONIC_VBMC_PORT_RANGE_START
-    local pdu_outlet=$IRONIC_VPDU_PORT_RANGE_START
-    local vm_name
-    local vm_opts=""
-    if [[ -n "$IRONIC_VM_EMULATOR" ]]; then
-        vm_opts+=" -e $IRONIC_VM_EMULATOR"
-    fi
-    vm_opts+=" -E $IRONIC_VM_ENGINE"
-
-    if [[ "$IRONIC_BOOT_MODE" == "uefi" ]]; then
-        vm_opts+=" -L $UEFI_LOADER_PATH -N $UEFI_NVRAM_PATH"
-    fi
-
-    local bridge_mac
-    bridge_mac=$(ip link show dev $IRONIC_VM_NETWORK_BRIDGE | grep -Eo "ether [A-Za-z0-9:]+"|sed "s/ether\ //")
-
-    for vm_name in $(_ironic_bm_vm_names); do
-        sudo -E su $STACK_USER -c "$IRONIC_SCRIPTS_DIR/create-node.sh -n $vm_name \
-            -c $IRONIC_VM_SPECS_CPU -m $IRONIC_VM_SPECS_RAM -d $IRONIC_VM_SPECS_DISK \
-            -a $IRONIC_VM_SPECS_CPU_ARCH -b $IRONIC_VM_NETWORK_BRIDGE $vm_opts -p $vbmc_port -o $pdu_outlet \
-            -i $IRONIC_VM_INTERFACE_COUNT -f $IRONIC_VM_SPECS_DISK_FORMAT  -M $PUBLIC_BRIDGE_MTU $log_arg" >> $IRONIC_VM_MACS_CSV_FILE
-        echo " ${bridge_mac} $IRONIC_VM_NETWORK_BRIDGE" >> $IRONIC_VM_MACS_CSV_FILE
-
-        vbmc_port=$((vbmc_port+1))
-        pdu_outlet=$((pdu_outlet+1))
-    done
-
-    if [[ -z "${IRONIC_PROVISION_NETWORK_NAME}" ]]; then
-        local ironic_net_id
-        ironic_net_id=$(openstack network show "$PRIVATE_NETWORK_NAME" -c id -f value)
-        create_ovs_taps $ironic_net_id
-
-        # NOTE(vsaienko) Neutron no longer setup routing to private network.
-        # https://github.com/openstack-dev/devstack/commit/1493bdeba24674f6634160d51b8081c571df4017
-        # Add route here to have connection to VMs during provisioning.
-        local pub_router_id
-        local r_net_gateway
-        pub_router_id=$(openstack router show $Q_ROUTER_NAME -f value -c id)
-        r_net_gateway=$(sudo ip netns exec qrouter-$pub_router_id ip -4 route get 8.8.8.8 |grep dev | awk '{print $7}')
-        local replace_range=${SUBNETPOOL_PREFIX_V4}
-        if [[ -z "${SUBNETPOOL_V4_ID}" ]]; then
-            replace_range=${FIXED_RANGE}
-        fi
-        sudo ip route replace $replace_range via $r_net_gateway
-    fi
-
 }
 
 function wait_for_nova_resources {
@@ -1575,7 +1340,28 @@ function provide_nodes {
     fi
 }
 
+function enroll_nodes_new {
+    sed -i "s/deploy_kernel:$/deploy_kernel: $IRONIC_DEPLOY_KERNEL_ID/g" $IRONIC_YAML_NODES
+    sed -i "s/deploy_ramdisk:$/deploy_ramdisk: $IRONIC_DEPLOY_RAMDISK_ID/g" $IRONIC_YAML_NODES
+
+    $IRONIC_CMD create $IRONIC_YAML_NODES
+
+    node_uuids=$($IRONIC_CMD node list -f value -c UUID)
+
+    for node_id in $node_uuids; do
+        $IRONIC_CMD node manage $node_id --wait $IRONIC_MANAGE_TIMEOUT
+    done
+
+    provide_nodes $node_uuids
+}
+
 function enroll_nodes {
+    if [[ -n $IRONIC_YAML_NODES ]]; then
+        enroll_nodes_new
+        create_nova_flavors
+        return
+    fi
+
     local chassis_id
     chassis_id=$($IRONIC_CMD chassis create --description "ironic test chassis" -f value -c uuid)
     die_if_not_set $LINENO chassis_id "Failed to create chassis"
@@ -1585,45 +1371,12 @@ function enroll_nodes {
 
     local interface_info
 
-    if [[ "$IRONIC_IS_HARDWARE" == "False" ]]; then
-        local ironic_node_cpu=$IRONIC_VM_SPECS_CPU
-        local ironic_node_ram=$IRONIC_VM_SPECS_RAM
-        local ironic_node_disk=$IRONIC_VM_SPECS_DISK
-        local ironic_ephemeral_disk=$IRONIC_VM_EPHEMERAL_DISK
-        local ironic_node_arch=x86_64
-        local ironic_hwinfo_file=$IRONIC_VM_MACS_CSV_FILE
-
-        if is_deployed_by_ipmitool; then
-            local node_options="\
-                --driver-info ipmi_address=${HOST_IP} \
-                --driver-info ipmi_username=admin \
-                --driver-info ipmi_password=password"
-        elif is_deployed_by_snmp; then
-            local node_options="\
-                --driver-info snmp_driver=${IRONIC_VPDU_SNMPDRIVER} \
-                --driver-info snmp_address=${HOST_IP} \
-                --driver-info snmp_port=${IRONIC_VPDU_LISTEN_PORT} \
-                --driver-info snmp_protocol=2c \
-                --driver-info snmp_community=${IRONIC_VPDU_COMMUNITY}"
-        elif is_deployed_by_redfish; then
-            local node_options="\
-                --driver-info redfish_address=http://${HOST_IP}:${IRONIC_REDFISH_EMULATOR_PORT} \
-                --driver-info redfish_username=admin \
-                --driver-info redfish_password=password"
-        fi
-        node_options="\
-            $node_options \
-            --driver-info deploy_kernel=$IRONIC_DEPLOY_KERNEL_ID \
-            --driver-info deploy_ramdisk=$IRONIC_DEPLOY_RAMDISK_ID"
-
-    else
-        local ironic_node_cpu=$IRONIC_HW_NODE_CPU
-        local ironic_node_ram=$IRONIC_HW_NODE_RAM
-        local ironic_node_disk=$IRONIC_HW_NODE_DISK
-        local ironic_ephemeral_disk=$IRONIC_HW_EPHEMERAL_DISK
-        local ironic_node_arch=$IRONIC_HW_ARCH
-        local ironic_hwinfo_file=$IRONIC_HWINFO_FILE
-    fi
+    local ironic_node_cpu=$IRONIC_HW_NODE_CPU
+    local ironic_node_ram=$IRONIC_HW_NODE_RAM
+    local ironic_node_disk=$IRONIC_HW_NODE_DISK
+    local ironic_ephemeral_disk=$IRONIC_HW_EPHEMERAL_DISK
+    local ironic_node_arch=$IRONIC_HW_ARCH
+    local ironic_hwinfo_file=$IRONIC_HWINFO_FILE
 
     local total_nodes=0
     local total_cpus=0
@@ -1639,115 +1392,76 @@ function enroll_nodes {
             node_capabilities+=" --property capabilities=boot_mode:uefi"
         fi
 
-        if [[ "$IRONIC_IS_HARDWARE" == "False" ]]; then
-            interface_info=$(echo $hardware_info | awk '{print $1}')
+        # Currently we require all hardware platform have same CPU/RAM/DISK info
+        # in future, this can be enhanced to support different type, and then
+        # we create the bare metal flavor with minimum value
+        local bmc_address
+        bmc_address=$(echo $hardware_info |awk  '{print $1}')
+        local mac_address
+        mac_address=$(echo $hardware_info |awk '{print $2}')
+        local bmc_username
+        bmc_username=$(echo $hardware_info |awk '{print $3}')
+        local bmc_passwd
+        bmc_passwd=$(echo $hardware_info |awk '{print $4}')
+        local node_options="--driver-info deploy_kernel=$IRONIC_DEPLOY_KERNEL_ID"
+        node_options+=" --driver-info deploy_ramdisk=$IRONIC_DEPLOY_RAMDISK_ID"
 
-            if is_deployed_by_ipmitool; then
-                local vbmc_port
-                vbmc_port=$(echo $hardware_info | awk '{print $2}')
-                node_options+=" --driver-info ipmi_port=$vbmc_port"
-            elif is_deployed_by_snmp; then
-                local pdu_outlet
-                pdu_outlet=$(echo $hardware_info | awk '{print $3}')
-                node_options+=" --driver-info snmp_outlet=$pdu_outlet"
-            elif is_deployed_by_redfish; then
-                node_options+=" --driver-info redfish_system_id=/redfish/v1/Systems/$node_name"
-            fi
-            # Local-link-connection options
-            local llc_opts=""
-            if [[ "${IRONIC_USE_LINK_LOCAL}" == "True" ]]; then
-                local switch_info
-                local switch_id
+        if is_deployed_by_ipmitool; then
+            node_options+=" --driver-info ipmi_address=$bmc_address \
+                --driver-info ipmi_password=$bmc_passwd \
+                --driver-info ipmi_username=$bmc_username"
+        elif is_deployed_by_cimc; then
+            node_options+=" --driver-info cimc_address=$bmc_address \
+                --driver-info cimc_password=$bmc_passwd \
+                --driver-info cimc_username=$bmc_username"
+        elif is_deployed_by_ucs; then
+            local ucs_service_profile
+            ucs_service_profile=$(echo $hardware_info |awk '{print $5}')
+            node_options+=" --driver-info ucs_address=$bmc_address \
+                --driver-info ucs_password=$bmc_passwd \
+                --driver-info ucs_username=$bmc_username \
+                --driver-info ucs_service_profile=$ucs_service_profile"
+        elif is_deployed_by_oneview; then
+            local server_hardware_uri
+            server_hardware_uri=$(echo $hardware_info |awk  '{print $1}')
+            local server_hardware_type_uri
+            server_hardware_type_uri=$(echo $hardware_info |awk '{print $2}')
+            local enclosure_group_uri
+            enclosure_group_uri=$(echo $hardware_info |awk '{print $3}')
+            local server_profile_template_uri
+            server_profile_template_uri=$(echo $hardware_info |awk '{print $4}')
+            mac_address=$(echo $hardware_info |awk '{print $5}')
+            local applied_server_profile_uri
+            applied_server_profile_uri=$(echo $hardware_info |awk '{print $6}')
 
-                switch_id=$(echo $hardware_info |awk '{print $4}')
-                switch_info=$(echo $hardware_info |awk '{print $5}')
-
-                # NOTE(vsaienko) we will add port_id later in the code.
-                llc_opts="--local-link-connection switch_id=${switch_id} \
-                    --local-link-connection switch_info=${switch_info} "
-            fi
-
-            if [[ "${IRONIC_STORAGE_INTERFACE}" == "cinder" ]]; then
-                local connector_iqn="iqn.2017-05.org.openstack.$node_prefix-$total_nodes"
-                if [[ -n "$node_capabilities" ]]; then
-                    node_capabilities+=",iscsi_boot:True"
-                else
-                    node_capabilities+=" --property capabilities=iscsi_boot:True"
-                fi
-            fi
-
-        else
-            # Currently we require all hardware platform have same CPU/RAM/DISK info
-            # in future, this can be enhanced to support different type, and then
-            # we create the bare metal flavor with minimum value
-            local bmc_address
-            bmc_address=$(echo $hardware_info |awk  '{print $1}')
-            local mac_address
-            mac_address=$(echo $hardware_info |awk '{print $2}')
-            local bmc_username
-            bmc_username=$(echo $hardware_info |awk '{print $3}')
-            local bmc_passwd
-            bmc_passwd=$(echo $hardware_info |awk '{print $4}')
-            local node_options="--driver-info deploy_kernel=$IRONIC_DEPLOY_KERNEL_ID"
-            node_options+=" --driver-info deploy_ramdisk=$IRONIC_DEPLOY_RAMDISK_ID"
-
-            if is_deployed_by_ipmitool; then
-                node_options+=" --driver-info ipmi_address=$bmc_address \
-                    --driver-info ipmi_password=$bmc_passwd \
-                    --driver-info ipmi_username=$bmc_username"
-            elif is_deployed_by_cimc; then
-                node_options+=" --driver-info cimc_address=$bmc_address \
-                    --driver-info cimc_password=$bmc_passwd \
-                    --driver-info cimc_username=$bmc_username"
-            elif is_deployed_by_ucs; then
-                local ucs_service_profile
-                ucs_service_profile=$(echo $hardware_info |awk '{print $5}')
-                node_options+=" --driver-info ucs_address=$bmc_address \
-                    --driver-info ucs_password=$bmc_passwd \
-                    --driver-info ucs_username=$bmc_username \
-                    --driver-info ucs_service_profile=$ucs_service_profile"
-            elif is_deployed_by_oneview; then
-                local server_hardware_uri
-                server_hardware_uri=$(echo $hardware_info |awk  '{print $1}')
-                local server_hardware_type_uri
-                server_hardware_type_uri=$(echo $hardware_info |awk '{print $2}')
-                local enclosure_group_uri
-                enclosure_group_uri=$(echo $hardware_info |awk '{print $3}')
-                local server_profile_template_uri
-                server_profile_template_uri=$(echo $hardware_info |awk '{print $4}')
-                mac_address=$(echo $hardware_info |awk '{print $5}')
-                local applied_server_profile_uri
-                applied_server_profile_uri=$(echo $hardware_info |awk '{print $6}')
-
-                node_options+=" --driver-info server_hardware_uri=$server_hardware_uri"
-                if [[ -n "$applied_server_profile_uri" ]]; then
-                    node_options+=" --driver-info applied_server_profile_uri=$applied_server_profile_uri"
-                fi
-
-                if [[ "$node_capabilities" ]]; then
-                    node_capabilities+=","
-                else
-                    node_capabilities+=" --property capabilities="
-                fi
-                node_capabilities+="server_hardware_type_uri:$server_hardware_type_uri,"
-                node_capabilities+="enclosure_group_uri:$enclosure_group_uri,"
-                node_capabilities+="server_profile_template_uri:$server_profile_template_uri"
-            elif is_deployed_by_ilo; then
-                node_options+=" --driver-info ilo_address=$bmc_address \
-                    --driver-info ilo_password=$bmc_passwd \
-                    --driver-info ilo_username=$bmc_username"
-                if [[ $IRONIC_DEPLOY_DRIVER != "pxe_ilo" && \
-                    $IRONIC_ENABLED_BOOT_INTERFACES == *"ilo-virtual-media"* ]]; then
-                    node_options+=" --driver-info ilo_deploy_iso=$IRONIC_DEPLOY_ISO_ID"
-                fi
-            elif is_deployed_by_drac; then
-                node_options+=" --driver-info drac_host=$bmc_address \
-                    --driver-info drac_password=$bmc_passwd \
-                    --driver-info drac_username=$bmc_username"
+            node_options+=" --driver-info server_hardware_uri=$server_hardware_uri"
+            if [[ -n "$applied_server_profile_uri" ]]; then
+                node_options+=" --driver-info applied_server_profile_uri=$applied_server_profile_uri"
             fi
 
-            interface_info="${mac_address}"
+            if [[ "$node_capabilities" ]]; then
+                node_capabilities+=","
+            else
+                node_capabilities+=" --property capabilities="
+            fi
+            node_capabilities+="server_hardware_type_uri:$server_hardware_type_uri,"
+            node_capabilities+="enclosure_group_uri:$enclosure_group_uri,"
+            node_capabilities+="server_profile_template_uri:$server_profile_template_uri"
+        elif is_deployed_by_ilo; then
+            node_options+=" --driver-info ilo_address=$bmc_address \
+                --driver-info ilo_password=$bmc_passwd \
+                --driver-info ilo_username=$bmc_username"
+            if [[ $IRONIC_DEPLOY_DRIVER != "pxe_ilo" && \
+                $IRONIC_ENABLED_BOOT_INTERFACES == *"ilo-virtual-media"* ]]; then
+                node_options+=" --driver-info ilo_deploy_iso=$IRONIC_DEPLOY_ISO_ID"
+            fi
+        elif is_deployed_by_drac; then
+            node_options+=" --driver-info drac_host=$bmc_address \
+                --driver-info drac_password=$bmc_passwd \
+                --driver-info drac_username=$bmc_username"
         fi
+
+        interface_info="${mac_address}"
 
         # First node created will be used for testing in ironic w/o glance
         # scenario, so we need to know its UUID.
@@ -1824,9 +1538,10 @@ function enroll_nodes {
         total_cpus=$((total_cpus+$ironic_node_cpu))
     done < $ironic_hwinfo_file
 
-    # NOTE(dtantsur): doing it outside of the loop, because of cleaning
-    provide_nodes $node_uuids
+    create_nova_flavors
+}
 
+function create_nova_flavors {
     if is_service_enabled nova && [[ "$VIRT_DRIVER" == "ironic" ]]; then
         if [[ "$HOST_TOPOLOGY_ROLE" != 'subnode' ]]; then
             local adjusted_disk
